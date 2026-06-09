@@ -1,0 +1,9 @@
+.vscode/
+.cache/
+
+# cangjie
+target/
+target_*/
+cjpm.lock
+.cjpm-history
+*.macrocall

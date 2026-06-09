@@ -1,0 +1,26 @@
+[package]
+  name = "pixo"
+  description = "nothing here"
+  version = "1.0.0"
+  output-type = "static"
+  compile-option = "-Woff unused -O2"
+  cjc-version = "1.1.0"
+
+
+[target.x86_64-w64-mingw32.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH_STATIC}/stdx" ]
+
+[target.aarch64-apple-darwin.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH_STATIC}/stdx" ]
+
+[target.aarch64-linux-ohos.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH_DYNAMIC}/stdx" ]
+
+[target.x86_64-linux-ohos.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH_DYNAMIC}/stdx" ]
+
+[target.x86_64-unknown-linux-gnu.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH_STATIC}/stdx" ]
+
+[target.aarch64-unknown-linux-gnu.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH_STATIC}/stdx" ]
