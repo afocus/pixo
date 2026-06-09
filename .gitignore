@@ -7,3 +7,5 @@ target_*/
 cjpm.lock
 .cjpm-history
 *.macrocall
+
+.DS_Store
