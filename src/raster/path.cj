@@ -3,7 +3,7 @@ package pixo.raster
 import std.collection.ArrayList
 
 // 路径绘制接口
-public interface Pathable {
+protected interface Pathable {
     func startTo(a: Point26_6): Unit
     func lineTo(b: Point26_6): Unit
     func quadTo(b: Point26_6, c: Point26_6): Unit

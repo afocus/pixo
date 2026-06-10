@@ -38,7 +38,7 @@ type glyphIndexFunc = (Rune) -> UInt16
 @OverflowWrapping
 func cmapFormat0(r: BinReader): glyphIndexFunc {
     r.skip(2 + 2 + 2) //format,length,language
-    let buf = r.readNextBytes(256).clone()
+    let buf = r.readBytes(256).clone()
     return {
         rn: Rune =>
             let code = UInt32(rn)
@@ -49,26 +49,26 @@ func cmapFormat0(r: BinReader): glyphIndexFunc {
 @OverflowWrapping
 func cmapFormat4(r: BinReader): glyphIndexFunc {
     r.skip(2 + 2 + 2) //format,length,language
-    let segCount = Int64(r.readNextUInt16() / 2)
+    let segCount = Int64(r.readUInt16() / 2)
     r.skip(6) // searchRange,entrySelector,rangeShift
 
     // 读取每个段的末尾码、起始码、delta 和偏移
     let ends = Array(segCount, {
-        i => UInt16(r.readNextUInt16())
+        i => UInt16(r.readUInt16())
     })
     // reservedPad
     r.skip(2)
     let starts = Array(segCount, {
-        i => UInt16(r.readNextUInt16())
+        i => UInt16(r.readUInt16())
     })
     let deltas = Array(segCount, {
-        i => Int16(r.readNextUInt16())
+        i => Int16(r.readUInt16())
     })
 
     // 记录偏移表起始位置，后面用于跳转
     let rangeStart = r.tell()
     let rangeOffsets = Array(segCount, {
-        i => UInt16(r.readNextUInt16())
+        i => UInt16(r.readUInt16())
     })
 
     return {
@@ -86,9 +86,9 @@ func cmapFormat4(r: BinReader): glyphIndexFunc {
                     let offsetInArray = (rangeOffsets[i]) / 2 + (code - starts[i])
                     let pos = rangeStart + i * 2
                     // r.seek(pos + Int64(rangeOffsets[i] + offsetInArray*2))
-                    // let glyph = r.readNextUInt16()
-                    // 使用readUInt16避免并发下seek错误
-                    let glyph = r.readUInt16(pos + Int64(rangeOffsets[i] + offsetInArray * 2))
+                    // let glyph = r.readUInt16()
+                    // 避免并发下seek错误
+                    let glyph = u16(r.buf[pos + Int64(rangeOffsets[i] + offsetInArray * 2)..])
                     if (glyph != 0) {
                         return (glyph + UInt16(deltas[i])) & 0xFFFF
                     }
@@ -102,10 +102,10 @@ func cmapFormat4(r: BinReader): glyphIndexFunc {
 @OverflowWrapping
 func cmapFormat6(r: BinReader): glyphIndexFunc {
     r.skip(2 + 2 + 2) // format,length,language
-    let firstCode = r.readNextUInt16()
-    let entryCount = Int64(r.readNextUInt16())
+    let firstCode = r.readUInt16()
+    let entryCount = Int64(r.readUInt16())
     let entrys = Array(entryCount, {
-        i => r.readNextUInt16()
+        i => r.readUInt16()
     })
     return {
         rn: Rune =>
@@ -124,11 +124,11 @@ func cmapFormat6(r: BinReader): glyphIndexFunc {
 @OverflowWrapping
 func cmapFormat12(r: BinReader): glyphIndexFunc {
     r.seek(2 + 2 + 4 + 4) // format,reserved,length,length
-    let numGroups = Int64(r.readNextUInt32())
+    let numGroups = Int64(r.readUInt32())
     let groups = Array(numGroups, {
-        i => (r.readNextUInt32(), // startChar
-            r.readNextUInt32(), // endChar
-            r.readNextUInt32() // startGlyph
+        i => (r.readUInt32(), // startChar
+            r.readUInt32(), // endChar
+            r.readUInt32() // startGlyph
         )
     })
     return {
@@ -187,14 +187,14 @@ let flagYIsSameOrPShortV = UInt8(0x0020)
 @OverflowWrapping
 func loadSimpleGlyh(tr: BinReader, buf: GlyphBuffer): Unit {
     // https://learn.microsoft.com/zh-cn/typography/opentype/spec/glyf#simple-glyph-description
-    let numContours = Int64(tr.readNextInt16())
+    let numContours = Int64(tr.readInt16())
     tr.seek(10)
     // 每个轮廓的终点索引
-    let endPts = Array(numContours, {_ => Int64(tr.readNextUInt16())})
+    let endPts = Array(numContours, {_ => Int64(tr.readUInt16())})
     // 总点数 = 最后一个终点索引 + 1
     let numPoints = endPts[numContours - 1] + 1
     // 跳过 TrueType 指令（hinting data）
-    let hintingSize = Int64(tr.readNextUInt16())
+    let hintingSize = Int64(tr.readUInt16())
     tr.skip(hintingSize)
 
     // 读取标志数组（可能包含重复标志）
@@ -207,11 +207,11 @@ func loadSimpleGlyh(tr: BinReader, buf: GlyphBuffer): Unit {
     var i = 0
     while (i < numPoints) {
         let base = i
-        let flag = tr.readNextUInt8()
+        let flag = tr.readUInt8()
         flags[i] = flag
         i++
         if ((flag & flagRepeat) != 0) {
-            let repeat = Int64(tr.readNextUInt8())
+            let repeat = Int64(tr.readUInt8())
             for (j in 0..repeat) {
                 flags[i] = flag
                 i++
@@ -223,7 +223,7 @@ func loadSimpleGlyh(tr: BinReader, buf: GlyphBuffer): Unit {
     for (i in 0..numPoints) {
         let flag = flags[i]
         let dx: Int16 = if ((flag & flagXShortVector) != 0) {
-            let v = Int16(tr.readNextUInt8())
+            let v = Int16(tr.readUInt8())
             if ((flag & flagXIsSameOrPShortV) != 0) {
                 v
             } else {
@@ -233,7 +233,7 @@ func loadSimpleGlyh(tr: BinReader, buf: GlyphBuffer): Unit {
             if ((flag & flagXIsSameOrPShortV) != 0) {
                 0
             } else {
-                Int16(tr.readNextUInt16())
+                Int16(tr.readUInt16())
             }
         }
         preX += dx
@@ -243,7 +243,7 @@ func loadSimpleGlyh(tr: BinReader, buf: GlyphBuffer): Unit {
     for (i in 0..numPoints) {
         let flag = flags[i]
         let dy: Int16 = if ((flag & flagYShortVector) != 0) {
-            let v = Int16(tr.readNextUInt8())
+            let v = Int16(tr.readUInt8())
             if ((flag & flagYIsSameOrPShortV) != 0) {
                 v
             } else {
@@ -253,7 +253,7 @@ func loadSimpleGlyh(tr: BinReader, buf: GlyphBuffer): Unit {
             if ((flag & flagYIsSameOrPShortV) != 0) {
                 0
             } else {
-                Int16(tr.readNextUInt16())
+                Int16(tr.readUInt16())
             }
         }
         preY += dy
@@ -301,35 +301,35 @@ func loadCompoundGlyh(f: TrueType, tr: BinReader, buf: GlyphBuffer, depth: Int64
     }
     tr.seek(10)
     while (true) {
-        let flag = tr.readNextUInt16()
+        let flag = tr.readUInt16()
         if ((flag & flagArgsAreXYValues) == 0) {
             // 不支持点位
             return
         }
-        let subIndex = tr.readNextUInt16()
+        let subIndex = tr.readUInt16()
         var m = Array<Int16>(6, repeat: 0)
         if ((flag & flagArg1And2AreWords) != 0) {
-            m[4] = Int16(tr.readNextUInt8())
-            m[5] = Int16(tr.readNextUInt8())
+            m[4] = Int16(tr.readUInt8())
+            m[5] = Int16(tr.readUInt8())
         } else {
-            m[4] = Int16(tr.readNextUInt16())
-            m[5] = Int16(tr.readNextUInt16())
+            m[4] = Int16(tr.readUInt16())
+            m[5] = Int16(tr.readUInt16())
         }
 
         var hasTransfrom = true
         match {
             case (flag & flagWeHaveAScale) != 0 =>
-                let scale = tr.readNextInt16()
+                let scale = tr.readInt16()
                 m[0] = scale
                 m[3] = scale
             case (flag & flagWeHaveAnXAndYScale) != 0 =>
-                m[0] = tr.readNextInt16()
-                m[3] = tr.readNextInt16()
+                m[0] = tr.readInt16()
+                m[3] = tr.readInt16()
             case (flag & flagWeHaveATwoByTwo) != 0 =>
-                m[0] = tr.readNextInt16()
-                m[1] = tr.readNextInt16()
-                m[2] = tr.readNextInt16()
-                m[3] = tr.readNextInt16()
+                m[0] = tr.readInt16()
+                m[1] = tr.readInt16()
+                m[2] = tr.readInt16()
+                m[3] = tr.readInt16()
             case _ => hasTransfrom = false
         }
 

@@ -15,36 +15,36 @@ func i16(buf: Array<Byte>): Int16 {
 }
 
 class BinReader {
-    private let buf: Array<Byte>
+    let buf: Array<Byte>
     private var pos: Int64 = 0
     init(data: Array<Byte>) {
         buf = data
     }
 
-    func readNextUInt8() {
+    func readUInt8() {
         pos++
         buf[pos - 1]
     }
 
-    func readNextUInt16() {
+    func readUInt16() {
         let v = u16(buf[pos..])
         pos += 2
         v
     }
 
-    func readNextInt16() {
+    func readInt16() {
         let v = i16(buf[pos..])
         pos += 2
         v
     }
 
-    func readNextUInt32(): UInt32 {
+    func readUInt32(): UInt32 {
         let v = u32(buf[pos..])
         pos += 4
         v
     }
 
-    func readNextBytes(length: Int64): Array<Byte> {
+    func readBytes(length: Int64): Array<Byte> {
         let b = buf[pos..pos + length]
         pos += length
         b
@@ -66,19 +66,22 @@ class BinReader {
         buf.size
     }
 
-    func readUInt8(offset: Int64): UInt8 {
+
+
+
+    func getUInt8(offset: Int64): UInt8 {
         buf[offset]
     }
 
-    func readUInt16(offset: Int64): UInt16 {
+    func getUInt16(offset: Int64): UInt16 {
         u16(buf[offset..])
     }
 
-    func readUInt32(offset: Int64): UInt32 {
+    func getUInt32(offset: Int64): UInt32 {
         u32(buf[offset..])
     }
 
-    func readBytes(offset: Int64, length: Int64): Array<Byte> {
+    func getBytes(offset: Int64, length: Int64): Array<Byte> {
         if (offset < 0 || offset > offset + length) {
             println("offset:${offset}, length:${length}")
             // throw InvalidBoundsException
@@ -91,6 +94,6 @@ class BinReader {
     }
 
     func subView(offset: Int64, length: Int64): BinReader {
-        BinReader(readBytes(offset, length))
+        BinReader(getBytes(offset, length))
     }
 }

@@ -50,8 +50,7 @@ public class TrueType {
         }
         // raw = data
         r = BinReader(data)
-        let sfntVer = r.readNextUInt32()
-
+        let sfntVer = r.readUInt32()
         match (sfntVer) {
             case 0x00010000 | 0x74727565 => ()
             case 0x4f54544f => cache.isPostScript = true
@@ -59,17 +58,17 @@ public class TrueType {
             case _ => ()
         }
 
-        let numTables = Int64(r.readNextUInt16())
+        let numTables = Int64(r.readUInt16())
         // searchRange, entrySelector, rangeShift 是用于快速查找表的参数，我们直接跳过
         r.skip(2 + 2 + 2)
 
         tables = Array<TableRecord>(14, repeat: TableRecord(0, 0))
         // println("numTables=${numTables}")
         for (_ in 0..numTables) {
-            let tag = r.readNextUInt32()
-            let checksum = r.readNextUInt32()
-            let offset = Int64(r.readNextUInt32())
-            let length = Int64(r.readNextUInt32())
+            let tag = r.readUInt32()
+            let checksum = r.readUInt32()
+            let offset = Int64(r.readUInt32())
+            let length = Int64(r.readUInt32())
             // println("tag ${tag} offset ${offset}, length ${length}")
             let i = match (tag) {
                 case 0x43424c43 => TablesIndex.cblc
@@ -108,16 +107,16 @@ public class TrueType {
             let tr = r.subView(t.offset, t.length)
             // majorVersion,minorVersion,fontRevision,checkSumAdjustment,magicNumber,flags
             tr.skip(2 + 2 + 4 + 4 + 4 + 2)
-            cache.unitsPerEm = Int32(tr.readNextUInt16())
+            cache.unitsPerEm = Int32(tr.readUInt16())
             // created,modified
             tr.skip(8 + 8)
-            let x0 = tr.readNextUInt16()
-            let y0 = tr.readNextUInt16()
-            let x1 = tr.readNextUInt16()
-            let y1 = tr.readNextUInt16()
+            let x0 = tr.readUInt16()
+            let y0 = tr.readUInt16()
+            let x1 = tr.readUInt16()
+            let y1 = tr.readUInt16()
             // macStyle,lowestRecPPEM,fontDirectionHint
             tr.skip(2 + 2 + 2)
-            cache.indexToLocFormat = tr.readNextUInt16() != 0
+            cache.indexToLocFormat = tr.readUInt16() != 0
             cache.bounds = (Int64(x0), Int64(y0), Int64(x1), Int64(y1))
         }
     }
@@ -128,19 +127,19 @@ public class TrueType {
             let tr = r.subView(t.offset, t.length)
             // version
             tr.skip(2)
-            let count = Int64(tr.readNextUInt16())
-            let storageOffset = Int64(tr.readNextUInt16())
+            let count = Int64(tr.readUInt16())
+            let storageOffset = Int64(tr.readUInt16())
             for (i in 0..count) {
                 // platformID,encodingID,languageID
                 tr.skip(2 + 2 + 2)
-                let nameID = Int64(tr.readNextUInt16())
-                let length = Int64(tr.readNextUInt16())
-                let offset = Int64(tr.readNextUInt16())
+                let nameID = Int64(tr.readUInt16())
+                let length = Int64(tr.readUInt16())
+                let offset = Int64(tr.readUInt16())
                 if (nameID != 1) {
                     continue
                 }
                 let start = storageOffset + offset
-                let namebuf = tr.readBytes(start, length)
+                let namebuf = tr.getBytes(start, length)
                 cache.name = if (namebuf.size > 2 && namebuf[0] == 0 && namebuf[1] == 0) {
                     stringifyUTF16(namebuf)
                 } else {
@@ -154,7 +153,7 @@ public class TrueType {
     func parseMaxp() {
         // https://www.microsoft.com/typography/otspec/maxp.htm
         let t = tables[TablesIndex.maxp]
-        cache.numGlyphs = Int64(r.readUInt16(t.offset + 4))
+        cache.numGlyphs = Int64(r.getUInt16(t.offset + 4))
     }
 
     func parseCamp() {
@@ -162,22 +161,22 @@ public class TrueType {
         let t = tables[TablesIndex.camp]
         let tr = r.subView(t.offset, t.length)
         // version
-        tr.readNextUInt16()
-        let numTables = Int64(tr.readNextUInt16())
+        tr.readUInt16()
+        let numTables = Int64(tr.readUInt16())
         var bestWidth = 0
         var bestFormat = 0
         var bestOffset = 0
         for (i in 0..numTables) {
-            let platformID = Int64(tr.readNextUInt16())
-            let encodingID = Int64(tr.readNextUInt16())
-            let subtableOffset = Int64(tr.readNextUInt32())
+            let platformID = Int64(tr.readUInt16())
+            let encodingID = Int64(tr.readUInt16())
+            let subtableOffset = Int64(tr.readUInt32())
 
             let w = platformEncodingWidth(platformID, encodingID)
             if (w <= bestWidth) {
                 continue
             }
 
-            let format = Int64(tr.readUInt16(subtableOffset))
+            let format = Int64(tr.getUInt16(subtableOffset))
             if (!supportedCmapFormat(format, platformID, encodingID)) {
                 continue
             }
@@ -207,15 +206,15 @@ public class TrueType {
             let tr = r.subView(t.offset, t.length)
             // majorVersion,minorVersion
             tr.skip(2 + 2)
-            cache.ascent = Int64(tr.readNextInt16())
-            cache.descent = Int64(tr.readNextInt16())
-            cache.lineGap = Int64(tr.readNextInt16())
+            cache.ascent = Int64(tr.readInt16())
+            cache.descent = Int64(tr.readInt16())
+            cache.lineGap = Int64(tr.readInt16())
             // advanceWidthMax,minLeftSideBearing,minRightSideBearing,xMaxExtent
             tr.skip(2 + 2 + 2 + 2)
-            cache.caretSlope = (Int64(tr.readNextUInt16()), // caretSlopeRise
-                Int64(tr.readNextUInt16()) // caretSlopeRun
+            cache.caretSlope = (Int64(tr.readUInt16()), // caretSlopeRise
+                Int64(tr.readUInt16()) // caretSlopeRun
             )
-            cache.numHMetrics = Int64(tr.readUInt16(34))
+            cache.numHMetrics = Int64(tr.getUInt16(34))
             if (cache.numHMetrics == 0 || cache.numHMetrics > cache.numGlyphs) {
                 // todo
             }
@@ -248,9 +247,9 @@ public class TrueType {
             let tr = r.subView(t.offset, t.length)
             for (i in 0..offsetCount) {
                 locations[i] = if (cache.indexToLocFormat) {
-                    tr.readNextUInt32()
+                    tr.readUInt32()
                 } else {
-                    2 * UInt32(tr.readNextUInt16())
+                    2 * UInt32(tr.readUInt16())
                 }
             }
         } else if (let Some(t) <- tables.get(TablesIndex.cblc)) {
@@ -286,13 +285,13 @@ public class TrueType {
             return
         }
         let t = tables[TablesIndex.glyf]
-        let d = r.readBytes(t.offset + Int64(i), Int64(j - i))
+        let d = r.getBytes(t.offset + Int64(i), Int64(j - i))
         if (d.size < 10) {
             return
         }
         let tr = BinReader(d)
         // 轮廓个数（正数表示简单字形，负数表示复合字形）
-        let numContours = tr.readNextInt16()
+        let numContours = tr.readInt16()
         tr.seek(0)
         if (numContours < 0) {
             loadCompoundGlyh(this, tr, buf, depth)
@@ -355,15 +354,8 @@ public class TrueType {
         } else {
             cache.numHMetrics - 1
         }
-        // let n = glyphIndex(Rune(cache.numHMetrics-1))
-        // let i = if(x>n){
-        //     Int64(n)
-        // }else{
-        //     Int64(x)
-        // }
         let t = tables[TablesIndex.hmtx]
-        let adv = scale(Int32(r.readUInt16(t.offset + 4 * Int64(v))) * ppem)
-        adv
+        scale(Int32(r.getUInt16(t.offset + 4 * Int64(v))) * ppem)
     }
 
     @OverflowWrapping

@@ -1,5 +1,10 @@
 package pixo.raster
 
+import pixo.bitmap.Bitmap
+import pixo.color.{Color, ColorType}
+import pixo.draw.blendOver
+import pixo.geom.Rect
+
 public interface Paintable {
     // 光栅化会多次调用panit处理span
     func panit(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit
@@ -31,4 +36,35 @@ public class ASCIIPaint <: Paintable {
             print(c)
         }
     }
+}
+
+// 当前仅支持ColorType.RGBA
+public class BitmapPaint <: Paintable {
+    let surface: Bitmap
+    let colorCb: (x: Int64, y: Int64) -> Color
+    let box: Rect
+    public init(rgbaBitmap: Bitmap, colorCallback: (x: Int64, y: Int64) -> Color) {
+        if (rgbaBitmap.colorType != ColorType.RGBA) {
+            throw Exception("raster: BitmapPaint only support ColorType.RGBA")
+        }
+        surface = rgbaBitmap
+        colorCb = colorCallback
+        box = rgbaBitmap.rect()
+    }
+
+    public func panit(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit {
+        if (alpha == 0 || !box.contains(x + n, y)) {
+            return
+        }
+        let aa = UInt16(alpha)
+        for (i in 0..n) {
+            let (r, g, b, a) = colorCb(x + i, y).toRGBA()
+            // 计算混合颜色最终透明度
+            let ia = (UInt16(a) * (0xff - aa)) >> 8
+            let offset = surface.pixelsOffset(x + i, y)
+            blendOver(surface.pixels[offset..offset + 4], r, g, b, UInt8(ia))
+        }
+    }
+
+    public func done(): Unit {}
 }

@@ -11,7 +11,7 @@ public enum Color <: ToString {
         }
     }
 
-    func toRGBA(): (UInt8, UInt8, UInt8, UInt8) {
+    public func toRGBA(): (UInt8, UInt8, UInt8, UInt8) {
         match (this) {
             case RGBA(r, g, b, a) => (r, g, b, a)
             case Gray(y) => (y, y, y, 0xff)

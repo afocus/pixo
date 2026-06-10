@@ -17,11 +17,11 @@ public class Fill <: Pathable{
     }
 
     public func quadTo(b:Point26_6,c:Point26_6){
-        quadToFn(s.lastPoint,b,c,lineTo)
+        quadToFn(s.lastP,b,c,lineTo)
     }
 
     public func cubicTo(b:Point26_6,c:Point26_6,d:Point26_6){
-        cubicToFn(s.lastPoint,b,c,d,lineTo)
+        cubicToFn(s.lastP,b,c,d,lineTo)
     }
 
     public func draw(iface:Paintable){
@@ -60,10 +60,10 @@ func quadToFn(a: Point26_6, b: Point26_6, c: Point26_6, lineCb: (Point26_6) -> U
     let devsq = devSquared(ax, ay, bx, by, cx, cy)
     if (devsq >= 0.333) {
         const tol: Float32 = 3.0
-        let n = 1 + Int64(sqrt(sqrt(tol * devsq)))
-        let nInv = 1.0 / Float32(n)
+        let n = Int64(sqrt(sqrt(tol * devsq)))
+        let nInv = 1.0 / Float32(n+1)
         var t: Float32 = 0.0
-        for (_ in 0..n - 1) {
+        for (_ in 0..n) {
             t += nInv
             let mt = 1.0 - t
             let t1 = mt * mt
@@ -99,10 +99,10 @@ func cubicToFn(a: Point26_6, b: Point26_6, c: Point26_6, d: Point26_6, lineCb: (
     )
     if (devsq >= 0.333) {
         const tol: Float32 = 3.0
-        let n = 1 + Int64(sqrt(sqrt(tol * devsq)))
-        let nInv = 1.0 / Float32(n)
+        let n = Int64(sqrt(sqrt(tol * devsq)))
+        let nInv = 1.0 / Float32(n+1)
         var t: Float32 = 0.0
-        for (_ in 0..n - 1) {
+        for (_ in 0..n) {
             t += nInv
             let mt = 1.0 - t
             let t1 = mt * mt * mt

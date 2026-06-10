@@ -20,8 +20,8 @@ class Scan {
     let existcell = ArrayList<Array<Cell>>()
 
     var extends = Rectangle26_6()
-    var firstPoint = Point26_6()
-    var lastPoint = Point26_6()
+    var firstP = Point26_6()
+    var lastP = Point26_6()
     var width: Int64 = 0
     var height: Int64 = 0
     var inPath: Bool = false
@@ -298,24 +298,24 @@ class Scan {
     }
 
     func start(a: Point26_6): Unit {
-        firstPoint = a
-        lastPoint = a
+        firstP = a
+        lastP = a
         inPath = true
     }
 
     func line(b: Point26_6): Unit {
-        if (b == lastPoint) {
+        if (b == lastP) {
             return
         }
-        lineToSegments(Line(lastPoint, b))
-        lastPoint = b
+        lineToSegments(Line(lastP, b))
+        lastP = b
     }
 
     @OverflowWrapping
     func rasterize(cb: SpanFn): Unit {
         if (inPath) {
-            if (firstPoint != lastPoint) {
-                line(firstPoint) // close path
+            if (firstP != lastP) {
+                line(firstP) // close path
             }
             inPath = false
         }

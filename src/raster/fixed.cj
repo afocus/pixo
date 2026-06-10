@@ -34,7 +34,7 @@ public struct Point26_6 <: Equatable<Point26_6> & ToString{
         Point26_6(this.x*64/k,this.y*64/k)
     }
 
-    public func empty():Bool{
+    public func isEmpty():Bool{
         x == 0 && y == 0
     }
 

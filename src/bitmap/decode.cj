@@ -28,6 +28,8 @@ public func Decode(r: InputStream): ?Bitmap {
 }
 
 
+
+
 public func registerDecode(name:String,iface:Decodeable){
     
 }
