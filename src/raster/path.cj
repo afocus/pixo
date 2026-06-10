@@ -3,26 +3,48 @@ package pixo.raster
 import std.collection.ArrayList
 
 // 路径绘制接口
-protected interface Pathable {
+public interface Pathable {
     func startTo(a: Point26_6): Unit
     func lineTo(b: Point26_6): Unit
     func quadTo(b: Point26_6, c: Point26_6): Unit
     func cubicTo(b: Point26_6, c: Point26_6, d: Point26_6): Unit
 }
 
-public type Path = ArrayList<Int26_6>
 
-extend Path <: Pathable {
+
+
+public enum PathCmd {
+    | Start
+    | Line
+    | Quad
+    | Cubic
+}
+public struct PathElement{
+    PathElement(
+        public let cmd:PathCmd,
+        public let points:Array<Point26_6>
+    ){}
+}
+
+public type Paths = ArrayList<PathElement>
+
+extend Paths <: Pathable {
     public func startTo(a: Point26_6) {
-        this.add(all: [0, a.x, a.y, 0])
+        add(PathElement(PathCmd.Start,a))
     }
     public func lineTo(b: Point26_6) {
-        this.add(all: [1, b.x, b.y, 1])
+        add(PathElement(PathCmd.Line,b))
     }
     public func quadTo(b: Point26_6, c: Point26_6) {
-        this.add(all: [2, b.x, b.y, c.x, c.y, 2])
+        add(PathElement(PathCmd.Quad,b, c))
     }
     public func cubicTo(b: Point26_6, c: Point26_6, d: Point26_6) {
-        this.add(all: [3, b.x, b.y, c.x, c.y, d.x, d.y, 3])
+        add(PathElement(PathCmd.Cubic,b, c))
     }
+    public func firstPoint():Point26_6{
+        this[0].points[0]
+    }
+
 }
+
+

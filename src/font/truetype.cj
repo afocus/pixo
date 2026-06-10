@@ -19,8 +19,12 @@ struct TablesIndex {
     static let post = 13
 }
 
+// 各个数据table位置
 struct TableRecord {
-    TableRecord(let offset: Int64, let length: Int64) {}
+    TableRecord(
+        let offset: Int64,
+        let length: Int64
+    ) {}
 }
 
 struct FontCache {
@@ -32,7 +36,7 @@ struct FontCache {
     var caretSlope = (0, 0)
     var numHMetrics = 0
     var bounds = (0, 0, 0, 0)
-    var unitsPerEm: Int32 = 0
+    var unitsPerEm: Int26_6 = 0
     var indexToLocFormat = false // false means short, true means long.
     var isPostScript = false
     var isColor = false
@@ -221,28 +225,12 @@ public class TrueType {
         }
     }
 
-    // func parseloca() {
-    //     let t = tables[TablesIndex.loca]
-    //     let tr = r.subView(t.offset, t.length)
-    //     let locations = Array<UInt32>(cache.numGlyphs + 1, repeat: 0)
-    //     let n = cache.numGlyphs + 1
-    //     let offset = UInt32(tables[TablesIndex.glyf].offset)
-    //     if (cache.indexToLocFormat) {
-    //         Array(n, {
-    //             i => 1 * tr.readUInt32(4 * i) + offset
-    //         })
-    //     } else {
-    //         Array(n, {
-    //             i => 2 * tr.readUInt32(2 * i) + offset
-    //         })
-    //     }
-    // }
-
     func parseGlyphData() {
         let offsetCount = cache.numGlyphs + 1
         let locations = Array<UInt32>(offsetCount, repeat: 0)
         if (cache.isPostScript) {
         // postscript 暂不支持
+        // todo
         } else if (let Some(t) <- tables.get(TablesIndex.loca)) {
             let tr = r.subView(t.offset, t.length)
             for (i in 0..offsetCount) {
@@ -255,6 +243,7 @@ public class TrueType {
         } else if (let Some(t) <- tables.get(TablesIndex.cblc)) {
             cache.isColor = true
             // 暂不支持颜色位图
+            // todo
         }
         cache.locaOffsets = locations
     }
@@ -309,16 +298,17 @@ public class TrueType {
     public func glyph(r: Rune, ppem: Int26_6, dot!: Point26_6 = Point26_6()) {
         // let ppem = Int32(0.5+(fontsize*64.0))
         let i = glyphIndex(r)
-        let buf = GlyphBuffer()
+        // todo objectPool ?
+        let buf = GlyphBuffer(ppem, cache.unitsPerEm, dot)
         loadGlyph(i, buf)
-        for (seg in buf.paths) {
-            for ((j, v) in seg.args.enumerate()) {
-                seg.args[j] = Point26_6(
-                    scale(v.x * ppem),
-                    -scale(v.y * ppem)
-                )
-            }
-        }
+        // for (seg in buf.paths) {
+        //     for ((j, v) in seg.args.enumerate()) {
+        //         seg.args[j] = Point26_6(
+        //             scale(v.x * ppem),
+        //             -scale(v.y * ppem)
+        //         )
+        //     }
+        // }
         let bounds = buf.bounds()
         let width = (bounds.max.x - bounds.min.x) >> 6
         let height = (bounds.max.y - bounds.min.y) >> 6

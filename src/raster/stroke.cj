@@ -5,7 +5,7 @@ import std.math.sqrt
 public class Stroke {
     let lhs: Fill
     // 反方向存储的路径
-    let rhs = Path()
+    let rhs = Paths()
     var startP = Point26_6() // 起始点
     var startNorm = Point26_6() // 起始法向量 用于闭合连接
     var a = Point26_6() // 当前点
@@ -139,10 +139,9 @@ public class Stroke {
             join.call(lhs, rhs, a, anorm, startNorm)
         } else {
             // open
-            let rightStartP = Point26_6(rhs[1], rhs[2])
             cap.call(lhs, a, anorm.neg())
             addRightPath()
-            cap.call(lhs, startP, startP - rightStartP)
+            cap.call(lhs, startP, startP - rhs.firstPoint())
         }
         // 清空以便下次使用
         rhs.clear()
@@ -153,31 +152,57 @@ public class Stroke {
         lhs.draw(iface)
     }
 
-    func addRightPath() {
+    func addRightPath(){
         var i = rhs.size - 1
-        while (true) {
-            match (rhs[i]) {
-                case 0 => return
-                case 1 =>
-                    i -= 4
-                    lhs.lineTo(Point26_6(rhs[i - 2], rhs[i - 1]))
-                case 2 =>
-                    i -= 6
+        while(i>=0){
+            match(rhs[i].cmd){
+                case PathCmd.Start =>
+                    return
+                case PathCmd.Line =>
+                    let lasti = rhs[i-1].points.size-1
+                    lhs.lineTo(rhs[i-1].points[lasti])
+                case PathCmd.Quad =>
+                    let lasti = rhs[i-1].points.size-1
                     lhs.quadTo(
-                        Point26_6(rhs[i + 2], rhs[i + 3]),
-                        Point26_6(rhs[i - 2], rhs[i - 1])
+                        rhs[i-0].points[0],
+                        rhs[i-1].points[lasti],
                     )
-                case 3 =>
-                    i -= 8
+                case PathCmd.Cubic =>
+                    let lasti = rhs[i-1].points.size-1
                     lhs.cubicTo(
-                        Point26_6(rhs[i + 4], rhs[i + 5]),
-                        Point26_6(rhs[i + 2], rhs[i + 3]),
-                        Point26_6(rhs[i - 2], rhs[i - 1]),
+                        rhs[i-0].points[1],
+                        rhs[i-0].points[0],
+                        rhs[i-1].points[lasti],
                     )
-                case _ => return
             }
         }
     }
+
+    // func addRightPath() {
+    //     var i = rhs.size - 1
+    //     while (true) {
+    //         match (rhs[i]) {
+    //             case 0 => return
+    //             case 1 =>
+    //                 i -= 4
+    //                 lhs.lineTo(Point26_6(rhs[i - 2], rhs[i - 1]))
+    //             case 2 =>
+    //                 i -= 6
+    //                 lhs.quadTo(
+    //                     Point26_6(rhs[i + 2], rhs[i + 3]),
+    //                     Point26_6(rhs[i - 2], rhs[i - 1])
+    //                 )
+    //             case 3 =>
+    //                 i -= 8
+    //                 lhs.cubicTo(
+    //                     Point26_6(rhs[i + 4], rhs[i + 5]),
+    //                     Point26_6(rhs[i + 2], rhs[i + 3]),
+    //                     Point26_6(rhs[i - 2], rhs[i - 1]),
+    //                 )
+    //             case _ => return
+    //         }
+    //     }
+    // }
 }
 
 // 添加一些stroke使用的辅助方法

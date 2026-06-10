@@ -1,7 +1,7 @@
 package pixo.font
 
 import std.collection.ArrayList
-import pixo.raster.{Int26_6, Point26_6, Rectangle26_6}
+import pixo.raster.{Int26_6, Point26_6, Rectangle26_6, Paths, Pathable}
 
 // const platformIDUnicode = 0
 // const platformIDMac = 1
@@ -146,24 +146,74 @@ func cmapFormat12(r: BinReader): glyphIndexFunc {
 
 /////////////////
 
-type GlyphPoint = (x: Int16, y: Int16, ov: Bool)
+type GlyphPoint = (Point26_6, Bool)
 
 class GlyphBuffer {
-    let paths = ArrayList<PathElement>()
+    let paths = Paths()
+    let ppem: Int26_6
+    let unitsPerEm: Int26_6
+    let dot: Point26_6
     var index = 0
+
+    init(ppem: Int26_6, unitsPerEm: Int26_6, dot: Point26_6) {
+        this.ppem = ppem
+        this.dot = dot
+        this.unitsPerEm = unitsPerEm
+    }
+
+    func scale(x: Int26_6): Int26_6 {
+        let nx = if (x >= 0) {
+            x + unitsPerEm / 2
+        } else {
+            x - unitsPerEm / 2
+        }
+        return nx / unitsPerEm * ppem
+    }
+
+    func normalizeContour(ps: Array<GlyphPoint>) {
+        if (ps.size < 3) {
+            return
+        }
+        var preoff: ?GlyphPoint = None
+        let firstOn = ps[0]
+
+        paths.startTo(firstOn[0])
+
+        for (i in 1..ps.size) {
+            let p = ps[i]
+            if (p[1]) {
+                if (let Some(op) <- preoff) {
+                    paths.quadTo(op[0], p[0])
+                } else {
+                    paths.lineTo(p[0])
+                }
+                preoff = None
+            } else {
+                // off
+                if (let Some(op) <- preoff) {
+                    let mid = (op[0] + p[0]) / (2 << 6)
+                    paths.quadTo(op[0], mid)
+                }
+                preoff = p
+            }
+        }
+        // 闭合
+        if (let Some(op) <- preoff) {
+            paths.quadTo(op[0], firstOn[0])
+        } else {
+            paths.lineTo(firstOn[0])
+        }
+    }
 
     @OverflowWrapping
     func bounds(): Rectangle26_6 {
-        var r = Rectangle26_6(
-            Point26_6((1 << 31) - 1, (1 << 31) - 1),
-            Point26_6(-(1 << 31), -(1 << 31)),
-        )
+        var r = Rectangle26_6()
         for (seg in paths) {
-            for (i in 0..seg.args.size) {
-                r.max.x = max(r.max.x, seg.args[i].x)
-                r.max.y = max(r.max.y, seg.args[i].y)
-                r.min.x = min(r.min.x, seg.args[i].x)
-                r.min.y = min(r.min.y, seg.args[i].y)
+            for (i in 0..seg.points.size) {
+                r.max.x = max(r.max.x, seg.points[i].x)
+                r.max.y = max(r.max.y, seg.points[i].y)
+                r.min.x = min(r.min.x, seg.points[i].x)
+                r.min.y = min(r.min.y, seg.points[i].y)
             }
         }
         r
@@ -199,8 +249,8 @@ func loadSimpleGlyh(tr: BinReader, buf: GlyphBuffer): Unit {
 
     // 读取标志数组（可能包含重复标志）
     let flags = Array<UInt8>(numPoints, repeat: 0)
-    let xCoordinates = Array<Int16>(numPoints, repeat: 0)
-    let yCoordinates = Array<Int16>(numPoints, repeat: 0)
+    let xCoordinates = Array<Int32>(numPoints, repeat: 0)
+    let yCoordinates = Array<Int32>(numPoints, repeat: 0)
 
     var preX: Int16 = 0
     var preY: Int16 = 0
@@ -237,7 +287,7 @@ func loadSimpleGlyh(tr: BinReader, buf: GlyphBuffer): Unit {
             }
         }
         preX += dx
-        xCoordinates[i] = preX
+        xCoordinates[i] = Int32(preX)
     }
 
     for (i in 0..numPoints) {
@@ -257,18 +307,20 @@ func loadSimpleGlyh(tr: BinReader, buf: GlyphBuffer): Unit {
             }
         }
         preY += dy
-        yCoordinates[i] = preY
+        yCoordinates[i] = Int32(preY)
     }
 
     let points = Array<GlyphPoint>(numPoints, {
-        i => (xCoordinates[i], yCoordinates[i], (flags[i] & flagOnCurve) != 0)
+        i => (Point26_6(
+                buf.scale(xCoordinates[i]),
+                -buf.scale(yCoordinates[i]),
+            ), (flags[i] & flagOnCurve) != 0)
     })
 
     var startId = 0
     buf.index = buf.paths.size
-
     for (endId in endPts) {
-        normalizeContour(buf.paths, points[startId..endId + 1])
+        buf.normalizeContour(points[startId..endId + 1])
         startId = endId + 1
     }
 }
@@ -338,9 +390,9 @@ func loadCompoundGlyh(f: TrueType, tr: BinReader, buf: GlyphBuffer, depth: Int64
         for (i in buf.index..buf.paths.size) {
             let ele = buf.paths[i]
             if (hasTransfrom) {
-                transformArgs(buf.paths[i].args, m)
+                transformArgs(buf.paths[i].points, m)
             } else {
-                translateArgs(buf.paths[i].args, Int32(m[4]), Int32(m[5]))
+                translateArgs(buf.paths[i].points, Int32(m[4]), Int32(m[5]))
             }
         }
         if ((flag & flagMoreComponents) == 0) {
@@ -368,13 +420,13 @@ func translateArgs(args: Array<Point26_6>, dx: Int26_6, dy: Int26_6) {
     }
 }
 
-public struct PathElement {
-    PathElement(let op: UInt8, let args: Array<Point26_6>) {}
-    // public func toString():String{
-    //     // "(${args})"
-    //     "${op} ${args}"
-    // }
-}
+// public struct PathElement {
+//     PathElement(let op: UInt8, let args: Array<Point26_6>) {}
+//     // public func toString():String{
+//     //     // "(${args})"
+//     //     "${op} ${args}"
+//     // }
+// }
 
 // @OverflowWrapping
 // func calcPathElementBounds(segs:Array<PathElement>):Rectangle26_6{
@@ -393,70 +445,70 @@ public struct PathElement {
 //     r
 // }
 
-@OverflowWrapping
-func normalizeContour(segs: ArrayList<PathElement>, ps: Array<GlyphPoint>) {
-    if (ps.size < 3) {
-        return
-    }
-    var preoff: ?GlyphPoint = None
-    let firstOn = ps[0]
-    segs.add(
-        PathElement(
-            b'M',
-            Point26_6(Int32(firstOn[0]), Int32(firstOn[1]))
-        )
-    )
+// @OverflowWrapping
+// func normalizeContour(segs: ArrayList<PathElement>, ps: Array<GlyphPoint>) {
+//     if (ps.size < 3) {
+//         return
+//     }
+//     var preoff: ?GlyphPoint = None
+//     let firstOn = ps[0]
+//     segs.add(
+//         PathElement(
+//             b'M',
+//             Point26_6(Int32(firstOn[0]), Int32(firstOn[1]))
+//         )
+//     )
 
-    for (i in 1..ps.size) {
-        let p = ps[i]
-        if (p[2]) {
-            if (let Some(op) <- preoff) {
-                segs.add(
-                    PathElement(
-                        b'Q',
-                        Point26_6(Int32(op[0]), Int32(op[1])),
-                        Point26_6(Int32(p[0]), Int32(p[1]))
-                    )
-                )
-            } else {
-                segs.add(
-                    PathElement(
-                        b'L',
-                        Point26_6(Int32(p[0]), Int32(p[1]))
-                    )
-                )
-            }
-            preoff = None
-        } else {
-            // off
-            if (let Some(op) <- preoff) {
-                let mid = (Int32(op[0] + p[0]) / 2, Int32(op[1] + p[1]) / 2)
-                segs.add(
-                    PathElement(
-                        b'Q',
-                        Point26_6(Int32(op[0]), Int32(op[1])),
-                        Point26_6(Int32(mid[0]), Int32(mid[1])),
-                    )
-                )
-            }
-            preoff = p
-        }
-    }
-    // 闭合
-    if (let Some(op) <- preoff) {
-        segs.add(
-            PathElement(
-                b'Q',
-                Point26_6(Int32(op[0]), Int32(op[1])),
-                Point26_6(Int32(firstOn[0]), Int32(firstOn[1])),
-            )
-        )
-    } else {
-        segs.add(
-            PathElement(
-                b'L',
-                Point26_6(Int32(firstOn[0]), Int32(firstOn[1]))
-            )
-        )
-    }
-}
+//     for (i in 1..ps.size) {
+//         let p = ps[i]
+//         if (p[2]) {
+//             if (let Some(op) <- preoff) {
+//                 segs.add(
+//                     PathElement(
+//                         b'Q',
+//                         Point26_6(Int32(op[0]), Int32(op[1])),
+//                         Point26_6(Int32(p[0]), Int32(p[1]))
+//                     )
+//                 )
+//             } else {
+//                 segs.add(
+//                     PathElement(
+//                         b'L',
+//                         Point26_6(Int32(p[0]), Int32(p[1]))
+//                     )
+//                 )
+//             }
+//             preoff = None
+//         } else {
+//             // off
+//             if (let Some(op) <- preoff) {
+//                 let mid = (Int32(op[0] + p[0]) / 2, Int32(op[1] + p[1]) / 2)
+//                 segs.add(
+//                     PathElement(
+//                         b'Q',
+//                         Point26_6(Int32(op[0]), Int32(op[1])),
+//                         Point26_6(Int32(mid[0]), Int32(mid[1])),
+//                     )
+//                 )
+//             }
+//             preoff = p
+//         }
+//     }
+//     // 闭合
+//     if (let Some(op) <- preoff) {
+//         segs.add(
+//             PathElement(
+//                 b'Q',
+//                 Point26_6(Int32(op[0]), Int32(op[1])),
+//                 Point26_6(Int32(firstOn[0]), Int32(firstOn[1])),
+//             )
+//         )
+//     } else {
+//         segs.add(
+//             PathElement(
+//                 b'L',
+//                 Point26_6(Int32(firstOn[0]), Int32(firstOn[1]))
+//             )
+//         )
+//     }
+// }
