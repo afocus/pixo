@@ -26,6 +26,13 @@ class BinReader {
         buf[pos - 1]
     }
 
+
+    func readInt8(){
+        let v = Int8.readBigEndian(buf)
+        pos++
+        v
+    }
+
     func readUInt16() {
         let v = u16(buf[pos..])
         pos += 2

@@ -1,6 +1,7 @@
 package pixo.font
 
-import pixo.raster.{Int26_6, Point26_6}
+import pixo.raster.*
+import pixo.bitmap.Bitmap
 
 struct TablesIndex {
     static let cblc = 0
@@ -27,7 +28,7 @@ struct TableRecord {
     ) {}
 }
 
-struct FontCache {
+public struct FontInfo {
     var name: String = ""
     var numGlyphs = 0
     var ascent = 0
@@ -40,24 +41,28 @@ struct FontCache {
     var indexToLocFormat = false // false means short, true means long.
     var isPostScript = false
     var isColor = false
-    var glyphIndex: ?glyphIndexFunc = None
-    var locaOffsets: Array<UInt32> = []
 }
 
 public class TrueType {
     let tables: Array<TableRecord>
     let r: BinReader
-    var cache = FontCache()
+    public var info = FontInfo()
+
+    // 平台字形查找函数
+    private var glyphIndexFn: ?glyphIndexFunc = None
+    // 
+    private var locaOffsets = Array<UInt32>()
     public init(data: Array<Byte>) {
         if (String.fromUtf8(data[0..4]) == "ttcf") {
             // 暂不支持ttc
+            throw Exception("pixo/font: unsupport ttc")
         }
         // raw = data
         r = BinReader(data)
         let sfntVer = r.readUInt32()
         match (sfntVer) {
             case 0x00010000 | 0x74727565 => ()
-            case 0x4f54544f => cache.isPostScript = true
+            case 0x4f54544f => info.isPostScript = true
             case 0x74746366 => ()
             case _ => ()
         }
@@ -111,7 +116,7 @@ public class TrueType {
             let tr = r.subView(t.offset, t.length)
             // majorVersion,minorVersion,fontRevision,checkSumAdjustment,magicNumber,flags
             tr.skip(2 + 2 + 4 + 4 + 4 + 2)
-            cache.unitsPerEm = Int32(tr.readUInt16())
+            info.unitsPerEm = Int32(tr.readUInt16())
             // created,modified
             tr.skip(8 + 8)
             let x0 = tr.readUInt16()
@@ -120,8 +125,8 @@ public class TrueType {
             let y1 = tr.readUInt16()
             // macStyle,lowestRecPPEM,fontDirectionHint
             tr.skip(2 + 2 + 2)
-            cache.indexToLocFormat = tr.readUInt16() != 0
-            cache.bounds = (Int64(x0), Int64(y0), Int64(x1), Int64(y1))
+            info.indexToLocFormat = tr.readUInt16() != 0
+            info.bounds = (Int64(x0), Int64(y0), Int64(x1), Int64(y1))
         }
     }
 
@@ -144,7 +149,7 @@ public class TrueType {
                 }
                 let start = storageOffset + offset
                 let namebuf = tr.getBytes(start, length)
-                cache.name = if (namebuf.size > 2 && namebuf[0] == 0 && namebuf[1] == 0) {
+                info.name = if (namebuf.size > 2 && namebuf[0] == 0 && namebuf[1] == 0) {
                     stringifyUTF16(namebuf)
                 } else {
                     String.fromUtf8(namebuf)
@@ -157,7 +162,7 @@ public class TrueType {
     func parseMaxp() {
         // https://www.microsoft.com/typography/otspec/maxp.htm
         let t = tables[TablesIndex.maxp]
-        cache.numGlyphs = Int64(r.getUInt16(t.offset + 4))
+        info.numGlyphs = Int64(r.getUInt16(t.offset + 4))
     }
 
     func parseCamp() {
@@ -174,12 +179,10 @@ public class TrueType {
             let platformID = Int64(tr.readUInt16())
             let encodingID = Int64(tr.readUInt16())
             let subtableOffset = Int64(tr.readUInt32())
-
             let w = platformEncodingWidth(platformID, encodingID)
             if (w <= bestWidth) {
                 continue
             }
-
             let format = Int64(tr.getUInt16(subtableOffset))
             if (!supportedCmapFormat(format, platformID, encodingID)) {
                 continue
@@ -195,7 +198,7 @@ public class TrueType {
             return
         }
         tr.seek(bestOffset)
-        this.cache.glyphIndex = match (bestFormat) {
+        this.glyphIndexFn = match (bestFormat) {
             case 0 => cmapFormat0(tr)
             case 4 => cmapFormat4(tr)
             case 6 => cmapFormat6(tr)
@@ -210,66 +213,249 @@ public class TrueType {
             let tr = r.subView(t.offset, t.length)
             // majorVersion,minorVersion
             tr.skip(2 + 2)
-            cache.ascent = Int64(tr.readInt16())
-            cache.descent = Int64(tr.readInt16())
-            cache.lineGap = Int64(tr.readInt16())
+            info.ascent = Int64(tr.readUInt16())
+            info.descent = Int64(tr.readUInt16())
+            info.lineGap = Int64(tr.readUInt16())
             // advanceWidthMax,minLeftSideBearing,minRightSideBearing,xMaxExtent
             tr.skip(2 + 2 + 2 + 2)
-            cache.caretSlope = (Int64(tr.readUInt16()), // caretSlopeRise
+            info.caretSlope = (Int64(tr.readUInt16()), // caretSlopeRise
                 Int64(tr.readUInt16()) // caretSlopeRun
             )
-            cache.numHMetrics = Int64(tr.getUInt16(34))
-            if (cache.numHMetrics == 0 || cache.numHMetrics > cache.numGlyphs) {
+            info.numHMetrics = Int64(tr.getUInt16(34))
+            if (info.numHMetrics == 0 || info.numHMetrics > info.numGlyphs) {
                 // todo
             }
         }
     }
 
     func parseGlyphData() {
-        let offsetCount = cache.numGlyphs + 1
-        let locations = Array<UInt32>(offsetCount, repeat: 0)
-        if (cache.isPostScript) {
+        let offsetCount = info.numGlyphs + 1
+        locaOffsets = Array<UInt32>(offsetCount, repeat: 0)
+        if (info.isPostScript) {
         // postscript 暂不支持
         // todo
         } else if (let Some(t) <- tables.get(TablesIndex.loca)) {
             let tr = r.subView(t.offset, t.length)
             for (i in 0..offsetCount) {
-                locations[i] = if (cache.indexToLocFormat) {
+                locaOffsets[i] = if (info.indexToLocFormat) {
                     tr.readUInt32()
                 } else {
                     2 * UInt32(tr.readUInt16())
                 }
             }
         } else if (let Some(t) <- tables.get(TablesIndex.cblc)) {
-            cache.isColor = true
+            info.isColor = true
             // 暂不支持颜色位图
             // todo
         }
-        cache.locaOffsets = locations
     }
 
     func parseKern() {
         // todo
     }
+    
 
-    func glyphIndex(r: Rune): UInt16 {
-        cache.glyphIndex?(r) ?? 0
+    @OverflowWrapping
+    func normalizeContour(phs: Paths, pts: Array<GlyphPoint>) {
+        var preoff: ?GlyphPoint = None
+        let firstOn = pts[0]
+        phs.startTo(firstOn.point)
+        for (i in 1..pts.size) {
+            let p = pts[i]
+            if (p.ov) {
+                if (let Some(op) <- preoff) {
+                    phs.quadTo(op.point, p.point)
+                } else {
+                    phs.lineTo(p.point)
+                }
+                preoff = None
+            } else {
+                // off
+                if (let Some(op) <- preoff) {
+                    let mid = (op.point + p.point) / (2 << 6)
+                    phs.quadTo(op.point, mid)
+                }
+                preoff = p
+            }
+        }
+        // 闭合
+        if (let Some(op) <- preoff) {
+            phs.quadTo(op.point, firstOn.point)
+        } else {
+            phs.lineTo(firstOn.point)
+        }
     }
 
-    func loadGlyph(index: UInt16, buf: GlyphBuffer, depth!: Int64 = 0): Unit {
-        if (cache.isColor) {
+    @OverflowWrapping
+    func loadSimpleGlyh(tr: BinReader, phs: Paths, ppem: Int26_6): Unit {
+        println("enter loadSimpleGlyh")
+        // https://learn.microsoft.com/zh-cn/typography/opentype/spec/glyf#simple-glyph-description
+        let numContours = Int64(tr.readInt16())
+        println("numContours=${numContours}")
+        tr.seek(10)
+        // 每个轮廓的终点索引
+        let endPts = Array(numContours, {_ => Int64(tr.readUInt16())})
+        // 总点数 = 最后一个终点索引 + 1
+        let numPoints = endPts[numContours - 1] + 1
+        // 跳过 TrueType 指令（hinting data）
+        let hintingSize = Int64(tr.readInt16())
+        tr.skip(hintingSize)
+
+        // 读取标志数组（可能包含重复标志）
+        let flags = Array<UInt8>(numPoints, repeat: 0)
+        let xCoordinates = Array<Int32>(numPoints, repeat: 0)
+        let yCoordinates = Array<Int32>(numPoints, repeat: 0)
+
+        var preX: Int16 = 0
+        var preY: Int16 = 0
+        var i = 0
+        while (i < numPoints) {
+            let base = i
+            let flag = tr.readUInt8()
+            flags[i] = flag
+            i++
+            if ((flag & flagRepeat) != 0) {
+                let repeat = Int64(tr.readUInt8())
+                for (j in 0..repeat) {
+                    flags[i] = flag
+                    i++
+                }
+            }
+        }
+
+        let tmpp = tr.tell()
+        for (i in 0..numPoints) {
+            let flag = flags[i]
+            let dx: Int16 = if ((flag & flagXShortVector) != 0) {
+                let v = Int16(tr.readUInt8())
+                if ((flag & flagXIsSameOrPShortV) != 0) {
+                    v
+                } else {
+                    -v
+                }
+            } else {
+                if ((flag & flagXIsSameOrPShortV) != 0) {
+                    0
+                } else {
+                   tr.readInt16()
+                }
+            }
+            preX += dx
+            xCoordinates[i] = Int32(preX)
+        }
+
+        for (i in 0..numPoints) {
+            let flag = flags[i]
+            let dy: Int16 = if ((flag & flagYShortVector) != 0) {
+                let v = Int16(tr.readUInt8())
+                if ((flag & flagYIsSameOrPShortV) != 0) {
+                    v
+                } else {
+                    -v
+                }
+            } else {
+                if ((flag & flagYIsSameOrPShortV) != 0) {
+                    0
+                } else {
+                    tr.readInt16()
+                }
+            }
+            preY += dy
+            yCoordinates[i] = Int32(preY)
+        }
+
+        let points = Array(numPoints, {
+            i => GlyphPoint(
+                Point26_6(
+                    scale(xCoordinates[i] * ppem),
+                    -scale(yCoordinates[i] * ppem),
+                ),
+                (flags[i] & flagOnCurve) != 0
+            )
+        })
+
+        var startId = 0
+        for (endId in endPts) {
+            normalizeContour(phs, points[startId..endId + 1])
+            startId = endId + 1
+        }
+    }
+
+    @OverflowWrapping
+    func loadCompoundGlyh(tr: BinReader, phs: Paths, ppem: Int26_6, depth: Int64): Unit {
+        if (depth > 20) {
             return
         }
-        if (cache.isPostScript) {
+        println("enter loadCompoundGlyh")
+        tr.seek(10)
+        while (true) {
+            let flag = tr.readUInt16()
+            if ((flag & flagArgsAreXYValues) == 0) {
+                // 不支持点位
+                throw Exception("pixo/font: unsupport compound glyph transform vector")
+            }
+            let subIndex = tr.readUInt16()
+            var m = Array<Int16>(6, repeat: 0)
+            if ((flag & flagArg1And2AreWords) != 0) {
+                m[4] = Int16(tr.readInt8())
+                m[5] = Int16(tr.readInt8())
+            } else {
+                m[4] = tr.readInt16()
+                m[5] = tr.readInt16()
+            }
+            let hasTransfrom = (flag&(flagWeHaveAScale|flagWeHaveAnXAndYScale|flagWeHaveATwoByTwo)) != 0
+            if(hasTransfrom){
+                match {
+                    case (flag & flagWeHaveAScale) != 0 =>
+                        let scale = tr.readInt16()
+                        m[0] = scale
+                        m[3] = scale
+                    case (flag & flagWeHaveAnXAndYScale) != 0 =>
+                        m[0] = tr.readInt16()
+                        m[3] = tr.readInt16()
+                    case (flag & flagWeHaveATwoByTwo) != 0 =>
+                        m[0] = tr.readInt16()
+                        m[1] = tr.readInt16()
+                        m[2] = tr.readInt16()
+                        m[3] = tr.readInt16()
+                    case _ => ()
+                }
+            }
+
+            // 递归获取子字形
+            // 记录下当前开始递归前path的位置
+            let pos = phs.size
+            loadGlyph(subIndex, phs, ppem, depth: depth + 1)
+            for (i in pos..phs.size) {
+                let ele = phs[i]
+                if (hasTransfrom) {
+                    transformArgs(ele.points, m)
+                }else{
+                    translateArgs(ele.points, Int32(m[4]),Int32(m[5]))
+                }
+            }
+            if ((flag & flagMoreComponents) == 0) {
+                return
+            }
+        }
+    }
+
+    // 把指定索引的字形轮廓加载到buf里
+    // depth 控制符合字形的递归深度
+    func loadGlyph(index: UInt16, phs: Paths, ppem: Int26_6, depth!: Int64 = 0): Unit {
+        if (info.isColor) {
+            return
+        }
+        if (info.isPostScript) {
             return
         }
 
         let x = Int64(index)
-        if (x >= cache.numGlyphs) {
+        if (x >= info.numGlyphs) {
             return
         }
-        let i = cache.locaOffsets[x + 0]
-        let j = cache.locaOffsets[x + 1]
+        let i = locaOffsets[x + 0]
+        let j = locaOffsets[x + 1]
         if (i >= j) {
             return
         }
@@ -283,85 +469,116 @@ public class TrueType {
         let numContours = tr.readInt16()
         tr.seek(0)
         if (numContours < 0) {
-            loadCompoundGlyh(this, tr, buf, depth)
+            loadCompoundGlyh(tr, phs, ppem, depth)
         } else {
-            loadSimpleGlyh(tr, buf)
+            loadSimpleGlyh(tr, phs, ppem)
         }
     }
 
-    // public func getGlyphPath(r:Rune,ppem:Int26_6):Array<PathElement>{
+    func glyphIndex(r: Rune): UInt16 {
+        if (let Some(fn) <- glyphIndexFn) {
+            fn(r)
+        } else {
+            UInt16(0)
+        }
+    }
 
-    //     []
+    public func glyphPath(r: Rune, ppem: Int26_6): Paths {
+        let phs = Paths()
+        let i = glyphIndex(r)
+        loadGlyph(i, phs, ppem)
+        phs
+    }
+
+    // 测试用
+    public func glyphAscii(r: Rune, ppem: Int26_6) {
+        let phs = glyphPath(r, ppem)
+        let bbox = phs.bbox()
+        let width = Int64(bbox.width() >> 6) + 1
+        let height = Int64(bbox.height() >> 6) + 1
+        let biasxy = Point26_6() - bbox.min
+        let ra = Fill(width, height)
+        ra.addPath(phs, dot: biasxy)
+        ra.draw(ASCIIPaint(width, height))
+    }
+
+    // public func glyph(r: Rune, ppem: Int26_6, dot!: Point26_6 = Point26_6()) {
+    //     // let ppem = Int32(0.5+(fontsize*64.0))
+    //     let i = if (let Some(fn) <- glyphIndexFn) {
+    //         fn(r)
+    //     } else {
+    //         UInt16(0)
+    //     }
+
+    //     let (glyphBounds, glyphPath) = glyphPath(r, ppem)
+    //     let w = glyphBounds.width() >> 6
+    //     let h = (glyphBounds.height() >> 6)
+
+    //     var biasxy = dot - glyphBounds.min
+
+    //     let advance = glyphAdvance(i, ppem) >> 6
+    //     let height = scale(Int32(info.ascent-info.descent)*ppem)>>6
+    //     biasxy += Point26_6(0,Int32(info.ascent)) + glyphBounds.min
+    //     println(biasxy.y)
+    //     println(info.descent)
+    //     println(glyphBounds.min.y)
+
+    //     println("width=${w},height=${h},advance=${advance},dd=${height} ascent=${info.ascent>>6},descent=${info.descent>>6}")
+
+    //     let ra = Fill(Int64(advance), Int64(height + 1))
+    //     for (seg in glyphPath) {
+    //         match (seg.cmd) {
+    //             case PathCmd.Start => ra.startTo(seg.points[0] + biasxy)
+    //             case PathCmd.Line => ra.lineTo(seg.points[0] + biasxy)
+    //             case PathCmd.Quad => ra.quadTo(seg.points[0] + biasxy, seg.points[1] + biasxy)
+    //             case _ => ()
+    //         }
+    //     }
+    //     ra.draw(ASCIIPaint(Int64(advance), Int64(height + 1)))
     // }
 
     @OverflowWrapping
-    public func glyph(r: Rune, ppem: Int26_6, dot!: Point26_6 = Point26_6()) {
-        // let ppem = Int32(0.5+(fontsize*64.0))
-        let i = glyphIndex(r)
-        // todo objectPool ?
-        let buf = GlyphBuffer(ppem, cache.unitsPerEm, dot)
-        loadGlyph(i, buf)
-        // for (seg in buf.paths) {
-        //     for ((j, v) in seg.args.enumerate()) {
-        //         seg.args[j] = Point26_6(
-        //             scale(v.x * ppem),
-        //             -scale(v.y * ppem)
-        //         )
-        //     }
-        // }
-        let bounds = buf.bounds()
-        let width = (bounds.max.x - bounds.min.x) >> 6
-        let height = (bounds.max.y - bounds.min.y) >> 6
-
-        let biasxy = Point26_6(
-            dot.x - bounds.min.x,
-            dot.y - bounds.min.y
-        )
-        let advance = glyphAdvance(i, ppem) >> 6
-        println("width=${width},height=${height},advance=${advance}")
-        println("pos=${bounds.min.x}")
-
-        // let ra = Raster(Int64(advance), Int64(height+1))
-        // for(seg in buf.paths){
-        //     match(seg.op){
-        //         case b'M' =>
-        //             ra.startTo(seg.args[0]+biasxy)
-        //         case b'L' =>
-        //             ra.lineTo(seg.args[0]+biasxy)
-        //         case b'Q' =>
-        //             ra.quadTo(seg.args[0]+biasxy,seg.args[1]+biasxy)
-        //         case _=>()
-        //     }
-        // }
-        // ra.draw()
-    }
-
-    @OverflowWrapping
-    func glyphAdvance(x: UInt16, ppem: Int26_6): Int26_6 {
-        let i = Int64(x)
-        let v = if (i < cache.numHMetrics) {
+    public func glyphAdvance(r: Rune, ppem: Int26_6): Int26_6 {
+        let i = Int64(glyphIndex(r))
+        let v = if (i < info.numHMetrics) {
             i
         } else {
-            cache.numHMetrics - 1
+            info.numHMetrics - 1
         }
         let t = tables[TablesIndex.hmtx]
-        scale(Int32(r.getUInt16(t.offset + 4 * Int64(v))) * ppem)
+        scale(Int32(this.r.getUInt16(t.offset + 4 * Int64(v))) * ppem)
     }
 
     @OverflowWrapping
     func scale(x: Int26_6): Int26_6 {
         let nx = if (x >= 0) {
-            x + cache.unitsPerEm / 2
+            x + info.unitsPerEm / 2
         } else {
-            x - cache.unitsPerEm / 2
+            x - info.unitsPerEm / 2
         }
-        return nx / cache.unitsPerEm
+        return nx / info.unitsPerEm
     }
 }
 
+@OverflowWrapping
 func stringifyUTF16(b: Array<Byte>): String {
     let runes = Array<Rune>(b.size / 2, {
         i => Rune(u16(b[i * 2..]))
     })
     String(runes)
+}
+
+extend Paths {
+    public func bbox(): Rectangle26_6 {
+        var r = Rectangle26_6()
+        for (ele in this) {
+            for (i in 0..ele.points.size) {
+                r.max.x = max(r.max.x, ele.points[i].x)
+                r.max.y = max(r.max.y, ele.points[i].y)
+                r.min.x = min(r.min.x, ele.points[i].x)
+                r.min.y = min(r.min.y, ele.points[i].y)
+            }
+        }
+        r
+    }
 }
