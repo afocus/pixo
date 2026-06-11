@@ -2,39 +2,57 @@ package pixo.raster
 
 import std.math.sqrt
 
-public class Fill <: Pathable{
-    let s:Scan
-    public init(w:Int64,h:Int64){
-        s = Scan(w,h)
+public class Fill <: Pathable {
+    let s: Scan
+    public init(w: Int64, h: Int64) {
+        s = Scan(w, h)
     }
 
-    public func startTo(a:Point26_6){
+    public func startTo(a: Point26_6) {
         s.start(a)
     }
 
-    public func lineTo(b:Point26_6){
+    public func lineTo(b: Point26_6) {
         s.line(b)
     }
 
-    public func quadTo(b:Point26_6,c:Point26_6){
-        quadToFn(s.lastP,b,c,lineTo)
+    public func quadTo(b: Point26_6, c: Point26_6) {
+        quadToFn(s.lastP, b, c, lineTo)
     }
 
-    public func cubicTo(b:Point26_6,c:Point26_6,d:Point26_6){
-        cubicToFn(s.lastP,b,c,d,lineTo)
+    public func cubicTo(b: Point26_6, c: Point26_6, d: Point26_6) {
+        cubicToFn(s.lastP, b, c, d, lineTo)
     }
 
-    public func draw(iface:Paintable){
-        s.rasterize{ x:Int64,y:Int64,n:Int64,a:Int16 =>
-            let ma = UInt8(min(UInt32(a)<<4,65535)>>8)
-            iface.panit(x,y,n,ma)
+    // phs 子路径
+    // dot 子路径应用的点偏移
+    public func addPath(phs: Paths, dot!: Point26_6 = Point26_6()) {
+        for (seg in phs) {
+            match (seg.cmd) {
+                case PathCmd.Start => startTo(seg.points[0] + dot)
+                case PathCmd.Line => lineTo(seg.points[0] + dot)
+                case PathCmd.Quad => quadTo(seg.points[0] + dot, seg.points[1] + dot)
+                case PathCmd.Cubic => cubicTo(seg.points[0] + dot, seg.points[1] + dot, seg.points[2] + dot)
+            }
         }
+    }
+
+    public func draw(iface: Paintable) {
+        s.rasterize(
+            {
+                x: Int64, y: Int64, n: Int64, a: Int16 =>
+                    if(a<=0){
+                        iface.panit(x, y, n, UInt8(0))
+                    }else{
+                        let ma = UInt8(min(UInt32(a) << 4, 65535) >> 8)
+                        iface.panit(x, y, n, ma)
+                    }
+            }
+        )
         iface.done()
         s.reset()
     }
 }
-
-
 
 func devSquared(x0: Float32, y0: Float32, x1: Float32, y1: Float32, x2: Float32, y2: Float32): Float32 {
     let devx = x0 - 2.0 * x1 + x2
@@ -42,11 +60,10 @@ func devSquared(x0: Float32, y0: Float32, x1: Float32, y1: Float32, x2: Float32,
     return devx * devx + devy * devy
 }
 
-
 // 辅助函数 二次贝塞尔曲线转直线段
 // a 起点 b 控制点 c 终点
 func quadToFn(a: Point26_6, b: Point26_6, c: Point26_6, lineCb: (Point26_6) -> Unit) {
-    if(a == b || b == c){
+    if (a == b || b == c) {
         lineCb(c)
         return
     }
@@ -61,7 +78,7 @@ func quadToFn(a: Point26_6, b: Point26_6, c: Point26_6, lineCb: (Point26_6) -> U
     if (devsq >= 0.333) {
         const tol: Float32 = 3.0
         let n = Int64(sqrt(sqrt(tol * devsq)))
-        let nInv = 1.0 / Float32(n+1)
+        let nInv = 1.0 / Float32(n + 1)
         var t: Float32 = 0.0
         for (_ in 0..n) {
             t += nInv
@@ -75,11 +92,10 @@ func quadToFn(a: Point26_6, b: Point26_6, c: Point26_6, lineCb: (Point26_6) -> U
     lineCb(c)
 }
 
-
 // 辅助函数 三次贝塞尔曲线转直线段
 // a 起点 b,c 控制点 d 终点
 func cubicToFn(a: Point26_6, b: Point26_6, c: Point26_6, d: Point26_6, lineCb: (Point26_6) -> Unit) {
-     if((a == b && c == d) || (a == b && b == c) || (c == b && d == c)){
+    if ((a == b && c == d) || (a == b && b == c) || (c == b && d == c)) {
         lineCb(d)
         return
     }
@@ -100,7 +116,7 @@ func cubicToFn(a: Point26_6, b: Point26_6, c: Point26_6, d: Point26_6, lineCb: (
     if (devsq >= 0.333) {
         const tol: Float32 = 3.0
         let n = Int64(sqrt(sqrt(tol * devsq)))
-        let nInv = 1.0 / Float32(n+1)
+        let nInv = 1.0 / Float32(n + 1)
         var t: Float32 = 0.0
         for (_ in 0..n) {
             t += nInv

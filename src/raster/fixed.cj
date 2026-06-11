@@ -70,6 +70,15 @@ public struct Rectangle26_6 <: ToString{
         p.x >= this.min.x && p.x < this.max.x && p.y>=this.min.y && p.y<this.max.y
     }
 
+
+    public func width():Int26_6{
+        max.x-min.x
+    }
+
+    public func height():Int26_6{
+        max.y-min.y
+    }
+
     public func toString():String{
         "Rectangle26_6(${min},${max})"
     }

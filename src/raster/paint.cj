@@ -68,3 +68,25 @@ public class BitmapPaint <: Paintable {
 
     public func done(): Unit {}
 }
+
+
+public class BitmapGrayPaint <: Paintable{
+    let surface: Bitmap
+    let box: Rect
+    public init(grayBitmap: Bitmap) {
+        if (grayBitmap.colorType != ColorType.Gray) {
+            throw Exception("raster: BitmapGrayPaint only support ColorType.Gray")
+        }
+        surface = grayBitmap
+        box = grayBitmap.rect()
+    }
+    public func panit(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit {
+        if (alpha == 0 || !box.contains(x + n, y)) {
+            return
+        }
+        for (i in 0..n) {
+            surface.pixels[y*surface.stride+x+i] = alpha
+        }
+    }
+    public func done(): Unit {}
+}
