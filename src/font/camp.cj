@@ -40,8 +40,13 @@ func cmapFormat0(r: BinReader): glyphIndexFunc {
     let buf = r.readBytes(256).clone()
     return {
         rn: Rune =>
-            let code = UInt32(rn)
-            UInt16(buf[Int64(code)])
+            let code = Int64(UInt32(rn))
+            if(code>0xff){
+                0
+            }else{
+                UInt16(buf[code])
+            }
+            
     }
 }
 
@@ -69,10 +74,13 @@ func cmapFormat4(r: BinReader): glyphIndexFunc {
     let rangeOffsets = Array(segCount, {
         i => UInt16(r.readUInt16())
     })
-
     return {
         rn: Rune =>
-            let code = UInt16(UInt32(rn))
+            let c = UInt32(rn)
+            if(c>0xffff){
+                return 0
+            }
+            let code = UInt16(c)
             for (i in 0..segCount) {
                 if (code < starts[i] || code > ends[i]) {
                     continue
@@ -82,14 +90,13 @@ func cmapFormat4(r: BinReader): glyphIndexFunc {
                     return (UInt16(deltas[i]) + code) & 0xFFFF
                 } else {
                     // 通过偏移表查找字形索引
-                    let offsetInArray = (rangeOffsets[i]) / 2 + (code - starts[i])
                     let pos = rangeStart + i * 2
-                    // r.seek(pos + Int64(rangeOffsets[i] + offsetInArray*2))
-                    // let glyph = r.readUInt16()
                     // 避免并发下seek错误
-                    let glyph = u16(r.buf[pos + Int64(rangeOffsets[i] + offsetInArray * 2)..])
+                    let glyph = u16(r.buf[pos + Int64(rangeOffsets[i]) + Int64(code - starts[i]) * 2..])
                     if (glyph != 0) {
                         return (glyph + UInt16(deltas[i])) & 0xFFFF
+                    }else{
+                        return 0
                     }
                 }
             }
@@ -132,6 +139,9 @@ func cmapFormat12(r: BinReader): glyphIndexFunc {
     return {
         rn: Rune =>
             let code = UInt32(rn)
+            if(code>0xffff){
+                return 0
+            }
             for (i in 0..numGroups) {
                 let (start, end, glyph) = groups[i]
                 if (code >= start && code <= end) {

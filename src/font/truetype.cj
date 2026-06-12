@@ -1,7 +1,6 @@
 package pixo.font
 
 import pixo.raster.*
-import pixo.bitmap.Bitmap
 
 struct TablesIndex {
     static let cblc = 0
@@ -52,18 +51,19 @@ public class TrueType {
     private var glyphIndexFn: ?glyphIndexFunc = None
     // 
     private var locaOffsets = Array<UInt32>()
+
     public init(data: Array<Byte>) {
-        if (String.fromUtf8(data[0..4]) == "ttcf") {
-            // 暂不支持ttc
-            throw Exception("pixo/font: unsupport ttc")
-        }
-        // raw = data
         r = BinReader(data)
         let sfntVer = r.readUInt32()
         match (sfntVer) {
             case 0x00010000 | 0x74727565 => ()
-            case 0x4f54544f => info.isPostScript = true
+            case 0x4f54544f => 
+                // otto
+                info.isPostScript = true
+                throw Exception("pixo/font: unsupport otto")
             case 0x74746366 => ()
+                // ttc
+                throw Exception("pixo/font: unsupport ttc")
             case _ => ()
         }
 
@@ -192,12 +192,12 @@ public class TrueType {
             bestOffset = subtableOffset
             bestWidth = w
         }
-
         if (bestWidth == 0) {
             // todo
             return
         }
         tr.seek(bestOffset)
+        println("bestFormat=${bestFormat}")
         this.glyphIndexFn = match (bestFormat) {
             case 0 => cmapFormat0(tr)
             case 4 => cmapFormat4(tr)
@@ -232,6 +232,7 @@ public class TrueType {
         let offsetCount = info.numGlyphs + 1
         locaOffsets = Array<UInt32>(offsetCount, repeat: 0)
         if (info.isPostScript) {
+            println("postscript")
         // postscript 暂不支持
         // todo
         } else if (let Some(t) <- tables.get(TablesIndex.loca)) {
@@ -253,7 +254,6 @@ public class TrueType {
     func parseKern() {
         // todo
     }
-    
 
     @OverflowWrapping
     func normalizeContour(phs: Paths, pts: Array<GlyphPoint>) {
@@ -287,12 +287,9 @@ public class TrueType {
     }
 
     @OverflowWrapping
-    func loadSimpleGlyh(tr: BinReader, phs: Paths, ppem: Int26_6): Unit {
+    func loadSimpleGlyh(tr: BinReader, phs: Paths, ppem: Int26_6, numContours: Int64): Unit {
         println("enter loadSimpleGlyh")
         // https://learn.microsoft.com/zh-cn/typography/opentype/spec/glyf#simple-glyph-description
-        let numContours = Int64(tr.readInt16())
-        println("numContours=${numContours}")
-        tr.seek(10)
         // 每个轮廓的终点索引
         let endPts = Array(numContours, {_ => Int64(tr.readUInt16())})
         // 总点数 = 最后一个终点索引 + 1
@@ -303,8 +300,7 @@ public class TrueType {
 
         // 读取标志数组（可能包含重复标志）
         let flags = Array<UInt8>(numPoints, repeat: 0)
-        let xCoordinates = Array<Int32>(numPoints, repeat: 0)
-        let yCoordinates = Array<Int32>(numPoints, repeat: 0)
+        let gpoints = Array<GlyphPoint>(numPoints, {_ => GlyphPoint()})
 
         var preX: Int16 = 0
         var preY: Int16 = 0
@@ -312,12 +308,15 @@ public class TrueType {
         while (i < numPoints) {
             let base = i
             let flag = tr.readUInt8()
+            let onCurve = (flag & flagOnCurve) != 0
             flags[i] = flag
+            gpoints[i].ov = onCurve
             i++
             if ((flag & flagRepeat) != 0) {
                 let repeat = Int64(tr.readUInt8())
                 for (j in 0..repeat) {
                     flags[i] = flag
+                    gpoints[i].ov = onCurve
                     i++
                 }
             }
@@ -337,11 +336,12 @@ public class TrueType {
                 if ((flag & flagXIsSameOrPShortV) != 0) {
                     0
                 } else {
-                   tr.readInt16()
+                    tr.readInt16()
                 }
             }
             preX += dx
-            xCoordinates[i] = Int32(preX)
+            // gpoints[i].point.x = scale(Int32(preX) * ppem)
+            gpoints[i].point.x = Int32(preX)
         }
 
         for (i in 0..numPoints) {
@@ -361,22 +361,23 @@ public class TrueType {
                 }
             }
             preY += dy
-            yCoordinates[i] = Int32(preY)
+            // gpoints[i].point.y = -scale(Int32(preY) * ppem)
+            gpoints[i].point.y =Int32(preY)
         }
 
-        let points = Array(numPoints, {
-            i => GlyphPoint(
-                Point26_6(
-                    scale(xCoordinates[i] * ppem),
-                    -scale(yCoordinates[i] * ppem),
-                ),
-                (flags[i] & flagOnCurve) != 0
-            )
-        })
+        // let points = Array(numPoints, {
+        //     i => GlyphPoint(
+        //         Point26_6(
+        //             scale(xCoordinates[i] * ppem),
+        //             -scale(yCoordinates[i] * ppem),
+        //         ),
+        //         (flags[i] & flagOnCurve) != 0
+        //     )
+        // })
 
         var startId = 0
         for (endId in endPts) {
-            normalizeContour(phs, points[startId..endId + 1])
+            normalizeContour(phs, gpoints[startId..endId + 1])
             startId = endId + 1
         }
     }
@@ -387,24 +388,25 @@ public class TrueType {
             return
         }
         println("enter loadCompoundGlyh")
-        tr.seek(10)
         while (true) {
             let flag = tr.readUInt16()
+            let glyphIndex = tr.readUInt16()
             if ((flag & flagArgsAreXYValues) == 0) {
                 // 不支持点位
                 throw Exception("pixo/font: unsupport compound glyph transform vector")
             }
-            let subIndex = tr.readUInt16()
             var m = Array<Int16>(6, repeat: 0)
             if ((flag & flagArg1And2AreWords) != 0) {
-                m[4] = Int16(tr.readInt8())
-                m[5] = Int16(tr.readInt8())
-            } else {
                 m[4] = tr.readInt16()
                 m[5] = tr.readInt16()
+            } else {
+                m[4] = Int16(tr.readInt8())
+                m[5] = Int16(tr.readInt8())
             }
-            let hasTransfrom = (flag&(flagWeHaveAScale|flagWeHaveAnXAndYScale|flagWeHaveATwoByTwo)) != 0
-            if(hasTransfrom){
+            
+            let hasTransfrom = (flag & (flagWeHaveAScale | flagWeHaveAnXAndYScale | flagWeHaveATwoByTwo)) != 0
+            if (hasTransfrom) {
+                println("mmmmmm")
                 match {
                     case (flag & flagWeHaveAScale) != 0 =>
                         let scale = tr.readInt16()
@@ -424,14 +426,14 @@ public class TrueType {
 
             // 递归获取子字形
             // 记录下当前开始递归前path的位置
-            let pos = phs.size
-            loadGlyph(subIndex, phs, ppem, depth: depth + 1)
-            for (i in pos..phs.size) {
-                let ele = phs[i]
+            let base = phs.size
+            loadGlyph(glyphIndex, phs, ppem, depth: depth + 1)
+            for (i in base..phs.size) {
+                let pts = phs[i].points
                 if (hasTransfrom) {
-                    transformArgs(ele.points, m)
+                    transformArgs(pts, m)
                 }else{
-                    translateArgs(ele.points, Int32(m[4]),Int32(m[5]))
+                    translateArgs(pts, Int32(m[4]), Int32(m[5]))
                 }
             }
             if ((flag & flagMoreComponents) == 0) {
@@ -443,13 +445,6 @@ public class TrueType {
     // 把指定索引的字形轮廓加载到buf里
     // depth 控制符合字形的递归深度
     func loadGlyph(index: UInt16, phs: Paths, ppem: Int26_6, depth!: Int64 = 0): Unit {
-        if (info.isColor) {
-            return
-        }
-        if (info.isPostScript) {
-            return
-        }
-
         let x = Int64(index)
         if (x >= info.numGlyphs) {
             return
@@ -467,11 +462,14 @@ public class TrueType {
         let tr = BinReader(d)
         // 轮廓个数（正数表示简单字形，负数表示复合字形）
         let numContours = tr.readInt16()
-        tr.seek(0)
+        if (numContours == 0) {
+            return
+        }
+        tr.seek(10)
         if (numContours < 0) {
             loadCompoundGlyh(tr, phs, ppem, depth)
         } else {
-            loadSimpleGlyh(tr, phs, ppem)
+            loadSimpleGlyh(tr, phs, ppem, Int64(numContours))
         }
     }
 
@@ -485,8 +483,21 @@ public class TrueType {
 
     public func glyphPath(r: Rune, ppem: Int26_6): Paths {
         let phs = Paths()
+        if (info.isColor || info.isPostScript) {
+            return phs
+        }
         let i = glyphIndex(r)
+        println("index=${i}")
         loadGlyph(i, phs, ppem)
+        for(v in phs){
+            for(x in 0..v.points.size){
+                let p = v.points[x]
+                v.points[x] = Point26_6(
+                    scale(p.x*ppem),
+                    -scale(p.y*ppem)
+                )
+            }
+        }
         phs
     }
 

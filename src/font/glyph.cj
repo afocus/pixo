@@ -2,11 +2,9 @@ package pixo.font
 
 import pixo.raster.{Int26_6, Point26_6, Rectangle26_6, Paths, Pathable}
 
-struct GlyphPoint {
-    GlyphPoint(
-        let point: Point26_6,
-        let ov: Bool
-    ) {}
+class GlyphPoint {
+    var point = Point26_6()
+    var ov = false
 }
 
 
