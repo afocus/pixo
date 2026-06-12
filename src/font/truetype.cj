@@ -28,18 +28,21 @@ struct TableRecord {
 }
 
 public struct FontInfo {
-    var name: String = ""
-    var numGlyphs = 0
-    var ascent = 0
-    var descent = 0
-    var lineGap = 0
-    var caretSlope = (0, 0)
-    var numHMetrics = 0
-    var bounds = (0, 0, 0, 0)
-    var unitsPerEm: Int26_6 = 0
-    var indexToLocFormat = false // false means short, true means long.
-    var isPostScript = false
-    var isColor = false
+    public var family: String = ""
+    public var subFamily:String = ""
+    public var copyRight:String = ""
+    public var style: FontStyle = FontStyle.Regular
+    public var numGlyphs = 0
+    public var ascent = 0
+    public var descent = 0
+    public var lineGap = 0
+    public var caretSlope = (0, 0)
+    public var numHMetrics = 0
+    public var bounds = (0, 0, 0, 0)
+    public var unitsPerEm: Int26_6 = 0
+    public var indexToLocFormat = false // false means short, true means long.
+    public var isPostScript = false
+    public var isColor = false
 }
 
 public class TrueType {
@@ -52,8 +55,10 @@ public class TrueType {
     // 
     private var locaOffsets = Array<UInt32>()
 
-    public init(data: Array<Byte>) {
+
+    init(data:Array<Byte>,offset:Int64){
         r = BinReader(data)
+        r.seek(offset)
         let sfntVer = r.readUInt32()
         match (sfntVer) {
             case 0x00010000 | 0x74727565 => ()
@@ -103,10 +108,15 @@ public class TrueType {
         }
         parseHead()
         parseName()
+        parseOS2()
         parseMaxp()
         parseGlyphData()
         parseCamp()
         parseHhea()
+    }
+
+    public init(data: Array<Byte>) {
+        this(data,0)
     }
 
     func parseHead() {
@@ -144,17 +154,24 @@ public class TrueType {
                 let nameID = Int64(tr.readUInt16())
                 let length = Int64(tr.readUInt16())
                 let offset = Int64(tr.readUInt16())
-                if (nameID != 1) {
+                if(nameID == 0){
                     continue
+                }
+                if (nameID>=3) {
+                    break
                 }
                 let start = storageOffset + offset
                 let namebuf = tr.getBytes(start, length)
-                info.name = if (namebuf.size > 2 && namebuf[0] == 0 && namebuf[1] == 0) {
+                let namestr = if (namebuf.size > 2 && namebuf[0] == 0 && namebuf[1] == 0) {
                     stringifyUTF16(namebuf)
                 } else {
                     String.fromUtf8(namebuf)
                 }
-                break
+                if(nameID == 1){
+                    info.family = namestr
+                }else{
+                    info.subFamily = namestr
+                }
             }
         }
     }
@@ -224,6 +241,29 @@ public class TrueType {
             info.numHMetrics = Int64(tr.getUInt16(34))
             if (info.numHMetrics == 0 || info.numHMetrics > info.numGlyphs) {
                 // todo
+            }
+        }
+    }
+
+    func parseOS2(){
+        if(let Some(t)<-tables.get(TablesIndex.os2)){
+            if(t.length>=64){
+                let tr = r.subView(t.offset,t.length)
+                let ver = tr.readUInt16()
+                if(ver>=5){
+                    tr.skip(62)
+                }else{
+                    tr.skip(60)
+                }
+                let fsSelection = tr.readUInt16()
+                let isItalic = (fsSelection&(1<<0)) != 0
+                let isBold   = (fsSelection&(1<<5)) != 0
+                info.style = match {
+                    case isBold && isItalic => FontStyle.BoldItalic
+                    case isBold => FontStyle.Bold
+                    case isItalic => FontStyle.Italic
+                    case _ => FontStyle.Regular
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 package pixo.font
 
-import pixo.raster.{Int26_6, Point26_6, Rectangle26_6, Paths, Pathable}
+import pixo.raster.{Int26_6, Point26_6}
 
 class GlyphPoint {
     var point = Point26_6()
