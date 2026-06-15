@@ -1,6 +1,6 @@
 package pixo.font
 
-import pixo.raster.{Int26_6, Point26_6}
+import pixo.raster.{Int26_6, Point26_6,Paths,Pathable}
 
 class GlyphPoint {
     var point = Point26_6()
@@ -52,5 +52,37 @@ func transformArgs(args: Array<Point26_6>, m: Array<Int16>) {
 func translateArgs(args: Array<Point26_6>, dx: Int26_6, dy: Int26_6) {
     for ((i, v) in args.enumerate()) {
         args[i] = Point26_6(v.x + dx, v.y + dy)
+    }
+}
+
+
+
+func normalizeContour(phs: Paths, pts: Array<GlyphPoint>) {
+    var preOff: ?GlyphPoint = None
+    let firstOn = pts[0]
+    phs.startTo(firstOn.point)
+    for (i in 1..pts.size) {
+        let p = pts[i]
+        if (p.ov) {
+            if (let Some(op) <- preOff) {
+                phs.quadTo(op.point, p.point)
+            } else {
+                phs.lineTo(p.point)
+            }
+            preOff = None
+        } else {
+            // off
+            if (let Some(op) <- preOff) {
+                let mid = (op.point + p.point) / (2 << 6)
+                phs.quadTo(op.point, mid)
+            }
+            preOff = p
+        }
+    }
+    // 闭合
+    if (let Some(op) <- preOff) {
+        phs.quadTo(op.point, firstOn.point)
+    } else {
+        phs.lineTo(firstOn.point)
     }
 }

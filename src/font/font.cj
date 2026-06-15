@@ -1,6 +1,7 @@
 package pixo.font
 
 import std.deriving.Derive
+import pixo.raster.Int26_6
 
 
 @Derive[ToString]
@@ -13,6 +14,25 @@ public enum FontStyle{
 
 
 
+public struct FontInfo {
+    public var family: String = ""
+    public var subFamily: String = ""
+    public var style: FontStyle = FontStyle.Regular
+    public var numGlyphs = 0
+    public var ascent = 0
+    public var descent = 0
+    public var lineGap = 0
+    public var caretSlope = (0, 0)
+    public var numHMetrics = 0
+    public var bounds = (0, 0, 0, 0)
+    public var unitsPerEm: Int26_6 = 0
+    public var indexToLocFormat = false // false means short, true means long.
+    public var isPostScript = false
+    public var isColor = false
+}
+
+
+
 
 public class FontCollection{
     let fontOffsets:Array<Int64>
@@ -20,7 +40,6 @@ public class FontCollection{
 
     public init(data:Array<Byte>){
         buf = data
-        
         let sfntVer = u32(data[..4])
         if(sfntVer == 0x74746366){
             let r = BinReader(data)
@@ -43,13 +62,12 @@ public class FontCollection{
         }
     }
 
-    public func getFont(i:Int64):?TrueType{
+    public func getFont(i:Int64):?SfntFont{
         if(let Some(v)<-fontOffsets.get(i)){
-            TrueType(buf,v)
+            SfntFont(buf,v)
         }else{
             None
         }
     }
-
 
 }

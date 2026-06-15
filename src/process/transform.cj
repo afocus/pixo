@@ -1,4 +1,4 @@
-package pixo.draw
+package pixo.process
 
 import std.math.{abs, sin, floor}
 import std.runtime.getProcessorCount

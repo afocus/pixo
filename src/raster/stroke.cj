@@ -177,32 +177,6 @@ public class Stroke {
             }
         }
     }
-
-    // func addRightPath() {
-    //     var i = rhs.size - 1
-    //     while (true) {
-    //         match (rhs[i]) {
-    //             case 0 => return
-    //             case 1 =>
-    //                 i -= 4
-    //                 lhs.lineTo(Point26_6(rhs[i - 2], rhs[i - 1]))
-    //             case 2 =>
-    //                 i -= 6
-    //                 lhs.quadTo(
-    //                     Point26_6(rhs[i + 2], rhs[i + 3]),
-    //                     Point26_6(rhs[i - 2], rhs[i - 1])
-    //                 )
-    //             case 3 =>
-    //                 i -= 8
-    //                 lhs.cubicTo(
-    //                     Point26_6(rhs[i + 4], rhs[i + 5]),
-    //                     Point26_6(rhs[i + 2], rhs[i + 3]),
-    //                     Point26_6(rhs[i - 2], rhs[i - 1]),
-    //                 )
-    //             case _ => return
-    //         }
-    //     }
-    // }
 }
 
 // 添加一些stroke使用的辅助方法

@@ -42,10 +42,10 @@ public class Fill <: Pathable {
             {
                 x: Int64, y: Int64, n: Int64, a: Int16 =>
                     if(a<=0){
-                        iface.panit(x, y, n, UInt8(0))
+                        iface.paint(x, y, n, UInt8(0))
                     }else{
                         let ma = UInt8(min(UInt32(a) << 4, 65535) >> 8)
-                        iface.panit(x, y, n, ma)
+                        iface.paint(x, y, n, ma)
                     }
             }
         )

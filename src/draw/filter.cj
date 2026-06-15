@@ -1,3 +1,0 @@
-package pixo.draw
-
-// blur

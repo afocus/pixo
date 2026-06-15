@@ -2,12 +2,12 @@ package pixo.raster
 
 import pixo.bitmap.Bitmap
 import pixo.color.{Color, ColorType}
-import pixo.draw.blendOver
+import pixo.process.blendOver
 import pixo.geom.Rect
 
 public interface Paintable {
-    // 光栅化会多次调用panit处理span
-    func panit(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit
+    // 光栅化会多次调用paint处理span
+    func paint(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit
     // 光栅化结束后调用
     func done(): Unit
 }
@@ -20,7 +20,7 @@ public class ASCIIPaint <: Paintable {
         pixs = Array<UInt8>(w * h, repeat: 0)
         stride = w
     }
-    public func panit(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit {
+    public func paint(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit {
         for (i in 0..n) {
             pixs[y * stride + x + i] = alpha
         }
@@ -35,6 +35,7 @@ public class ASCIIPaint <: Paintable {
             let c = chars[Int64(pixs[y] >> 5)]
             print(c)
         }
+        println()
     }
 }
 
@@ -44,25 +45,29 @@ public class BitmapPaint <: Paintable {
     let colorCb: (x: Int64, y: Int64) -> Color
     let box: Rect
     public init(rgbaBitmap: Bitmap, colorCallback: (x: Int64, y: Int64) -> Color) {
-        if (rgbaBitmap.colorType != ColorType.RGBA) {
-            throw Exception("raster: BitmapPaint only support ColorType.RGBA")
-        }
         surface = rgbaBitmap
         colorCb = colorCallback
         box = rgbaBitmap.rect()
     }
 
-    public func panit(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit {
+    public func paint(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit {
         if (alpha == 0 || !box.contains(x + n, y)) {
             return
         }
         let aa = UInt16(alpha)
-        for (i in 0..n) {
-            let (r, g, b, a) = colorCb(x + i, y).toRGBA()
-            // 计算混合颜色最终透明度
-            let ia = (UInt16(a) * (0xff - aa)) >> 8
-            let offset = surface.pixelsOffset(x + i, y)
-            blendOver(surface.pixels[offset..offset + 4], r, g, b, UInt8(ia))
+        match(surface.colorType){
+            case ColorType.Gray =>
+                for (i in 0..n) {
+                    surface.pixels[y*surface.stride+x+i] = alpha
+                }
+            case ColorType.RGBA =>
+                for (i in 0..n) {
+                    let (r, g, b, a) = colorCb(x + i, y).toRGBA()
+                    // 计算混合颜色最终透明度
+                    let ia = (UInt16(a) * (0xff - aa)) >> 8
+                    let offset = surface.pixelsOffset(x + i, y)
+                    blendOver(surface.pixels[offset..offset + 4], r, g, b, UInt8(ia))
+                }
         }
     }
 
@@ -70,23 +75,3 @@ public class BitmapPaint <: Paintable {
 }
 
 
-public class BitmapGrayPaint <: Paintable{
-    let surface: Bitmap
-    let box: Rect
-    public init(grayBitmap: Bitmap) {
-        if (grayBitmap.colorType != ColorType.Gray) {
-            throw Exception("raster: BitmapGrayPaint only support ColorType.Gray")
-        }
-        surface = grayBitmap
-        box = grayBitmap.rect()
-    }
-    public func panit(x: Int64, y: Int64, n: Int64, alpha: UInt8): Unit {
-        if (alpha == 0 || !box.contains(x + n, y)) {
-            return
-        }
-        for (i in 0..n) {
-            surface.pixels[y*surface.stride+x+i] = alpha
-        }
-    }
-    public func done(): Unit {}
-}

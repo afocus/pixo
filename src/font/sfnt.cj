@@ -1,5 +1,6 @@
 package pixo.font
 
+import pixo.raster.Paths
 import pixo.raster.*
 
 struct TablesIndex {
@@ -27,25 +28,9 @@ struct TableRecord {
     ) {}
 }
 
-public struct FontInfo {
-    public var family: String = ""
-    public var subFamily:String = ""
-    public var copyRight:String = ""
-    public var style: FontStyle = FontStyle.Regular
-    public var numGlyphs = 0
-    public var ascent = 0
-    public var descent = 0
-    public var lineGap = 0
-    public var caretSlope = (0, 0)
-    public var numHMetrics = 0
-    public var bounds = (0, 0, 0, 0)
-    public var unitsPerEm: Int26_6 = 0
-    public var indexToLocFormat = false // false means short, true means long.
-    public var isPostScript = false
-    public var isColor = false
-}
 
-public class TrueType {
+
+public class SfntFont {
     let tables: Array<TableRecord>
     let r: BinReader
     public var info = FontInfo()
@@ -55,18 +40,17 @@ public class TrueType {
     // 
     private var locaOffsets = Array<UInt32>()
 
-
-    init(data:Array<Byte>,offset:Int64){
+    init(data: Array<Byte>, offset: Int64) {
         r = BinReader(data)
         r.seek(offset)
         let sfntVer = r.readUInt32()
         match (sfntVer) {
             case 0x00010000 | 0x74727565 => ()
-            case 0x4f54544f => 
+            case 0x4f54544f =>
                 // otto
                 info.isPostScript = true
                 throw Exception("pixo/font: unsupport otto")
-            case 0x74746366 => ()
+            case 0x74746366 =>
                 // ttc
                 throw Exception("pixo/font: unsupport ttc")
             case _ => ()
@@ -75,9 +59,7 @@ public class TrueType {
         let numTables = Int64(r.readUInt16())
         // searchRange, entrySelector, rangeShift 是用于快速查找表的参数，我们直接跳过
         r.skip(2 + 2 + 2)
-
         tables = Array<TableRecord>(14, repeat: TableRecord(0, 0))
-        // println("numTables=${numTables}")
         for (_ in 0..numTables) {
             let tag = r.readUInt32()
             let checksum = r.readUInt32()
@@ -110,13 +92,33 @@ public class TrueType {
         parseName()
         parseOS2()
         parseMaxp()
-        parseGlyphData()
-        parseCamp()
+        parseCmap()
         parseHhea()
+
+        let offsetCount = info.numGlyphs + 1
+        locaOffsets = Array<UInt32>(offsetCount, repeat: 0)
+        if (info.isPostScript) {
+            println("postscript")
+            // postscript 暂不支持
+            // todo
+        } else if (let Some(t) <- tables.get(TablesIndex.loca)) {
+            let tr = r.subView(t.offset, t.length)
+            for (i in 0..offsetCount) {
+                locaOffsets[i] = if (info.indexToLocFormat) {
+                    tr.readUInt32()
+                } else {
+                    2 * UInt32(tr.readUInt16())
+                }
+            }
+        } else if (let Some(t) <- tables.get(TablesIndex.cblc)) {
+            info.isColor = true
+            // 暂不支持颜色位图
+            // todo
+        }
     }
 
     public init(data: Array<Byte>) {
-        this(data,0)
+        this(data, 0)
     }
 
     func parseHead() {
@@ -154,10 +156,10 @@ public class TrueType {
                 let nameID = Int64(tr.readUInt16())
                 let length = Int64(tr.readUInt16())
                 let offset = Int64(tr.readUInt16())
-                if(nameID == 0){
+                if (nameID == 0) {
                     continue
                 }
-                if (nameID>=3) {
+                if (nameID >= 3) {
                     break
                 }
                 let start = storageOffset + offset
@@ -167,9 +169,9 @@ public class TrueType {
                 } else {
                     String.fromUtf8(namebuf)
                 }
-                if(nameID == 1){
+                if (nameID == 1) {
                     info.family = namestr
-                }else{
+                } else {
                     info.subFamily = namestr
                 }
             }
@@ -182,7 +184,7 @@ public class TrueType {
         info.numGlyphs = Int64(r.getUInt16(t.offset + 4))
     }
 
-    func parseCamp() {
+    func parseCmap() {
         // https://www.microsoft.com/typography/otspec/cmap.htm
         let t = tables[TablesIndex.camp]
         let tr = r.subView(t.offset, t.length)
@@ -214,7 +216,6 @@ public class TrueType {
             return
         }
         tr.seek(bestOffset)
-        println("bestFormat=${bestFormat}")
         this.glyphIndexFn = match (bestFormat) {
             case 0 => cmapFormat0(tr)
             case 4 => cmapFormat4(tr)
@@ -245,19 +246,20 @@ public class TrueType {
         }
     }
 
-    func parseOS2(){
-        if(let Some(t)<-tables.get(TablesIndex.os2)){
-            if(t.length>=64){
-                let tr = r.subView(t.offset,t.length)
+    func parseOS2() {
+        if (let Some(t) <- tables.get(TablesIndex.os2)) {
+            if (t.length >= 64) {
+                let tr = r.subView(t.offset, t.length)
                 let ver = tr.readUInt16()
-                if(ver>=5){
-                    tr.skip(62)
-                }else{
-                    tr.skip(60)
+                let offset = if (ver >= 5) {
+                    64
+                } else {
+                    62
                 }
+                tr.seek(offset)
                 let fsSelection = tr.readUInt16()
-                let isItalic = (fsSelection&(1<<0)) != 0
-                let isBold   = (fsSelection&(1<<5)) != 0
+                let isItalic = (fsSelection & (1 << 0)) != 0
+                let isBold = (fsSelection & (1 << 5)) != 0
                 info.style = match {
                     case isBold && isItalic => FontStyle.BoldItalic
                     case isBold => FontStyle.Bold
@@ -268,63 +270,13 @@ public class TrueType {
         }
     }
 
-    func parseGlyphData() {
-        let offsetCount = info.numGlyphs + 1
-        locaOffsets = Array<UInt32>(offsetCount, repeat: 0)
-        if (info.isPostScript) {
-            println("postscript")
-        // postscript 暂不支持
-        // todo
-        } else if (let Some(t) <- tables.get(TablesIndex.loca)) {
-            let tr = r.subView(t.offset, t.length)
-            for (i in 0..offsetCount) {
-                locaOffsets[i] = if (info.indexToLocFormat) {
-                    tr.readUInt32()
-                } else {
-                    2 * UInt32(tr.readUInt16())
-                }
-            }
-        } else if (let Some(t) <- tables.get(TablesIndex.cblc)) {
-            info.isColor = true
-            // 暂不支持颜色位图
-            // todo
-        }
-    }
+
 
     func parseKern() {
         // todo
     }
 
-    @OverflowWrapping
-    func normalizeContour(phs: Paths, pts: Array<GlyphPoint>) {
-        var preoff: ?GlyphPoint = None
-        let firstOn = pts[0]
-        phs.startTo(firstOn.point)
-        for (i in 1..pts.size) {
-            let p = pts[i]
-            if (p.ov) {
-                if (let Some(op) <- preoff) {
-                    phs.quadTo(op.point, p.point)
-                } else {
-                    phs.lineTo(p.point)
-                }
-                preoff = None
-            } else {
-                // off
-                if (let Some(op) <- preoff) {
-                    let mid = (op.point + p.point) / (2 << 6)
-                    phs.quadTo(op.point, mid)
-                }
-                preoff = p
-            }
-        }
-        // 闭合
-        if (let Some(op) <- preoff) {
-            phs.quadTo(op.point, firstOn.point)
-        } else {
-            phs.lineTo(firstOn.point)
-        }
-    }
+
 
     @OverflowWrapping
     func loadSimpleGlyh(tr: BinReader, phs: Paths, ppem: Int26_6, numContours: Int64): Unit {
@@ -341,7 +293,6 @@ public class TrueType {
         // 读取标志数组（可能包含重复标志）
         let flags = Array<UInt8>(numPoints, repeat: 0)
         let gpoints = Array<GlyphPoint>(numPoints, {_ => GlyphPoint()})
-
         var preX: Int16 = 0
         var preY: Int16 = 0
         var i = 0
@@ -380,7 +331,6 @@ public class TrueType {
                 }
             }
             preX += dx
-            // gpoints[i].point.x = scale(Int32(preX) * ppem)
             gpoints[i].point.x = Int32(preX)
         }
 
@@ -401,19 +351,8 @@ public class TrueType {
                 }
             }
             preY += dy
-            // gpoints[i].point.y = -scale(Int32(preY) * ppem)
-            gpoints[i].point.y =Int32(preY)
+            gpoints[i].point.y = Int32(preY)
         }
-
-        // let points = Array(numPoints, {
-        //     i => GlyphPoint(
-        //         Point26_6(
-        //             scale(xCoordinates[i] * ppem),
-        //             -scale(yCoordinates[i] * ppem),
-        //         ),
-        //         (flags[i] & flagOnCurve) != 0
-        //     )
-        // })
 
         var startId = 0
         for (endId in endPts) {
@@ -443,7 +382,7 @@ public class TrueType {
                 m[4] = Int16(tr.readInt8())
                 m[5] = Int16(tr.readInt8())
             }
-            
+
             let hasTransfrom = (flag & (flagWeHaveAScale | flagWeHaveAnXAndYScale | flagWeHaveATwoByTwo)) != 0
             if (hasTransfrom) {
                 println("mmmmmm")
@@ -472,7 +411,7 @@ public class TrueType {
                 let pts = phs[i].points
                 if (hasTransfrom) {
                     transformArgs(pts, m)
-                }else{
+                } else {
                     translateArgs(pts, Int32(m[4]), Int32(m[5]))
                 }
             }
@@ -527,14 +466,13 @@ public class TrueType {
             return phs
         }
         let i = glyphIndex(r)
-        println("index=${i}")
         loadGlyph(i, phs, ppem)
-        for(v in phs){
-            for(x in 0..v.points.size){
+        for (v in phs) {
+            for (x in 0..v.points.size) {
                 let p = v.points[x]
                 v.points[x] = Point26_6(
-                    scale(p.x*ppem),
-                    -scale(p.y*ppem)
+                    scale(p.x * ppem),
+                    -scale(p.y * ppem) // 栅格化Y轴向下
                 )
             }
         }
@@ -553,40 +491,7 @@ public class TrueType {
         ra.draw(ASCIIPaint(width, height))
     }
 
-    // public func glyph(r: Rune, ppem: Int26_6, dot!: Point26_6 = Point26_6()) {
-    //     // let ppem = Int32(0.5+(fontsize*64.0))
-    //     let i = if (let Some(fn) <- glyphIndexFn) {
-    //         fn(r)
-    //     } else {
-    //         UInt16(0)
-    //     }
 
-    //     let (glyphBounds, glyphPath) = glyphPath(r, ppem)
-    //     let w = glyphBounds.width() >> 6
-    //     let h = (glyphBounds.height() >> 6)
-
-    //     var biasxy = dot - glyphBounds.min
-
-    //     let advance = glyphAdvance(i, ppem) >> 6
-    //     let height = scale(Int32(info.ascent-info.descent)*ppem)>>6
-    //     biasxy += Point26_6(0,Int32(info.ascent)) + glyphBounds.min
-    //     println(biasxy.y)
-    //     println(info.descent)
-    //     println(glyphBounds.min.y)
-
-    //     println("width=${w},height=${h},advance=${advance},dd=${height} ascent=${info.ascent>>6},descent=${info.descent>>6}")
-
-    //     let ra = Fill(Int64(advance), Int64(height + 1))
-    //     for (seg in glyphPath) {
-    //         match (seg.cmd) {
-    //             case PathCmd.Start => ra.startTo(seg.points[0] + biasxy)
-    //             case PathCmd.Line => ra.lineTo(seg.points[0] + biasxy)
-    //             case PathCmd.Quad => ra.quadTo(seg.points[0] + biasxy, seg.points[1] + biasxy)
-    //             case _ => ()
-    //         }
-    //     }
-    //     ra.draw(ASCIIPaint(Int64(advance), Int64(height + 1)))
-    // }
 
     @OverflowWrapping
     public func glyphAdvance(r: Rune, ppem: Int26_6): Int26_6 {
